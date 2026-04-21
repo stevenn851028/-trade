@@ -25,7 +25,7 @@
                                                      ▼
                              ┌───────────────────────────────────┐
                              │      Strategy Engine              │
-                             │  (EMA10/60 crossover, 30m)        │
+                             │  (EMA10/60 crossover, 15m)        │
                              │  → SignalEvent(LONG / FLAT)       │
                              └─────────┬─────────────────────────┘
                                        │
@@ -68,7 +68,7 @@
 - 合約資訊：契約規格、保證金、結算日
 
 ### 2. Data Pipeline（資料處理）
-- Tick → 30 分鐘 K 棒聚合
+- Tick → 15 分鐘 K 棒聚合
 - 連續月合約串接（rollover）
 - 時區正規化（Asia/Taipei）
 - 資料完整性檢查（缺漏、重複、異常值）

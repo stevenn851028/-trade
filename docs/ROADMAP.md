@@ -26,11 +26,11 @@
 
 ## Phase 1 — 回測基礎設施 + 策略驗證
 
-**目標**：用真實歷史資料驗證 EMA10/60 30 分鐘策略是否具備統計上的正報酬。
+**目標**：用真實歷史資料驗證 EMA10/60 15 分鐘策略是否具備統計上的正報酬。
 
 **實作項目**：
 - [ ] `src/twquant/events.py`：事件型別
-- [ ] `src/twquant/data/`：TAIFEX CSV loader、1m → 30m 聚合、連續合約串接
+- [ ] `src/twquant/data/`：TAIFEX CSV loader、1m → 15m 聚合、連續合約串接
 - [ ] `src/twquant/strategies/ema_crossover.py`：策略實作
 - [ ] `src/twquant/risk/`：基本風控（部位大小、Kill Switch）
 - [ ] `src/twquant/execution/backtest.py`：模擬撮合（含滑價、費用）
@@ -40,7 +40,7 @@
 - [ ] 單元測試覆蓋率 ≥ 70%
 - [ ] Walk-forward 分析工具
 
-**資料**：回補 2018–2025 1 分 K，產出 30 分鐘連續合約序列
+**資料**：回補 2018–2025 1 分 K，產出 15 分鐘連續合約序列
 
 **通過條件**（見 `BACKTEST.md` § 目標門檻）：
 - Sharpe ≥ 1.0
@@ -61,7 +61,7 @@
 
 **實作項目**：
 - [ ] Shioaji 即時 quote 接入
-- [ ] Tick → 30m K 棒即時聚合
+- [ ] Tick → 15m K 棒即時聚合
 - [ ] Live Executor（模擬模式：發送訊號但不真實下單）
 - [ ] 日盤 + 夜盤連續運行
 - [ ] 斷線自動重連

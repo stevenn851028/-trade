@@ -124,7 +124,7 @@ Pull Request 觸發：
 
 ```yaml
 # configs/strategy.yaml
-ema_cross_30m:
+ema_cross_15m:
   fast_period: 10
   slow_period: 60
   session_mode: combined

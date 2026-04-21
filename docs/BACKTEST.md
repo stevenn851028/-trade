@@ -135,7 +135,7 @@ for each bar in historical_bars:
 ```bash
 # 跑單次回測
 python -m twquant.backtest run \
-    --strategy ema_cross_30m \
+    --strategy ema_cross_15m \
     --symbol TXF \
     --start 2020-01-01 \
     --end 2024-12-31 \
@@ -144,7 +144,7 @@ python -m twquant.backtest run \
 
 # Walk-forward
 python -m twquant.backtest walk_forward \
-    --strategy ema_cross_30m \
+    --strategy ema_cross_15m \
     --train-window 2y \
     --test-window 6m \
     --start 2018-01-01 \
