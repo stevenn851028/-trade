@@ -1,43 +1,69 @@
-# 台指期 EMA 量化指標
+# TW Quant Trading System（台指期量化交易系統）
 
-以 EMA（指數移動平均）為核心的台指期／台灣加權指數量化分析腳本：抓取歷史資料、計算多條 EMA、偵測黃金／死亡交叉並執行簡易回測。
+> **願景**：建立一套可維運 10–20 年、以技術指標為核心、全自動化的量化交易系統，作為穩健、可複製、不依賴主觀判斷的被動收入來源。
 
-## 安裝
+---
 
-```bash
-pip install -r requirements.txt
-```
+## 專案定位
 
-## 使用
+- **時間尺度**：10–20 年，以「累積複利 + 穩定勝率」為目標，不追求短期暴利
+- **系統化**：所有進出場、資金配置、風控皆由程式決定並執行，排除情緒干擾
+- **可驗證**：策略上線前必須通過 ≥5 年歷史回測、前向分析（walk-forward）與模擬交易
+- **可擴充**：從單策略（EMA10/60 30 分鐘）開始，逐步擴充為多策略、多商品、多時間週期的投組
+- **可維運**：在本機或 VPS 連續運作，具備斷線重連、狀態恢復、監控告警
 
-```bash
-# 預設抓取台灣加權指數、EMA12/26 交叉策略
-python taiwan_index_ema.py
+## 第一階段策略
 
-# 改用台指期連續近月合約
-python taiwan_index_ema.py --symbol TX=F --start 2023-01-01
+| 項目 | 設定 |
+| --- | --- |
+| 標的 | 台指期貨 TXF（大台）／可選 MXF（小台） |
+| K 棒週期 | **30 分鐘** |
+| 進場訊號 | **EMA10 由下往上貫穿 EMA60**（黃金交叉）→ 做多 |
+| 出場訊號 | **EMA10 由上往下貫穿 EMA60**（死亡交叉）→ 平倉 |
+| 方向 | 僅做多（Phase 1 暫不做空，之後評估） |
+| 部位管理 | 單筆單口，固定口數 |
 
-# 自訂 EMA 週期並輸出 CSV
-python taiwan_index_ema.py --fast 5 --slow 20 --long 60 --output txf_ema.csv
-```
+詳細規格：[`docs/STRATEGY.md`](docs/STRATEGY.md)
 
-## 參數
+## 文件索引
 
-| 參數 | 說明 | 預設 |
-| --- | --- | --- |
-| `--symbol` | Yahoo Finance 代號（`^TWII` 加權、`TX=F` 台指期） | `^TWII` |
-| `--start` / `--end` | 日期區間 `YYYY-MM-DD` | 2020-01-01 ~ 今日 |
-| `--interval` | K 棒週期（`1d`, `1h`, `15m` …） | `1d` |
-| `--fast` / `--slow` / `--long` | EMA 週期 | 12 / 26 / 60 |
-| `--capital` | 回測起始資金 | 1,000,000 |
-| `--output` | 輸出含指標的 CSV 路徑 | 無 |
+| 文件 | 目的 |
+| --- | --- |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 系統整體架構、模組切分、資料流 |
+| [`docs/STRATEGY.md`](docs/STRATEGY.md) | EMA10/60 30 分鐘策略的完整規格與邊界案例 |
+| [`docs/DATA_PIPELINE.md`](docs/DATA_PIPELINE.md) | 行情資料來源、清洗、儲存、連續月合約處理 |
+| [`docs/BACKTEST.md`](docs/BACKTEST.md) | 回測框架設計、績效指標、過擬合防範 |
+| [`docs/RISK_MANAGEMENT.md`](docs/RISK_MANAGEMENT.md) | 部位大小、停損、資金管理、Kill Switch |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | Phase 0 → Phase 5 分期發展計畫 |
+| [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) | 開發規範、分支策略、測試要求、部署流程 |
 
-## 策略邏輯
+## 專案進度
 
-- **進場**：快線 EMA 由下往上穿越慢線 EMA（黃金交叉）→ 做多
-- **出場**：快線 EMA 由上往下穿越慢線 EMA（死亡交叉）→ 平倉
-- **績效指標**：總報酬、勝率、最大回撤、交易次數
+**目前階段：Phase 0 — 系統設計（進行中）**
+
+尚未進入實作階段。所有架構文件完成並經過檢討後，才會開始撰寫程式碼。
+
+見 [`docs/ROADMAP.md`](docs/ROADMAP.md)。
+
+## 原型程式
+
+[`prototypes/taiwan_index_ema.py`](prototypes/taiwan_index_ema.py) 是初期的快速驗證腳本，僅供概念參考，**不會進入正式系統**。正式實作將依據 `docs/ARCHITECTURE.md` 的模組切分重新撰寫。
+
+## 技術棧（暫定）
+
+| 層級 | 選型 |
+| --- | --- |
+| 語言 | Python 3.11+ |
+| 資料處理 | pandas / polars |
+| 回測引擎 | 自研事件驅動引擎（或評估 backtrader / vectorbt） |
+| 券商 API | 永豐 Shioaji（優先）／群益、凱基 備選 |
+| 儲存 | SQLite（Phase 1）→ PostgreSQL + TimescaleDB（Phase 3+） |
+| 排程 | APScheduler / systemd timer |
+| 監控 | loguru + Telegram / Line Notify |
+| 部署 | 本機 → VPS（Docker） |
+
+詳見 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
 
 ## 免責聲明
 
-本專案僅供教學與研究用途，所有內容不構成任何投資建議。實際交易請自行評估風險。
+本專案為個人研究用途，所有內容與程式碼不構成任何投資建議。期貨交易具有槓桿風險，可能造成超過原始投入的虧損，實際執行前請務必自行評估風險並諮詢專業人士。
