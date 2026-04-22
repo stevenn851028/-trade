@@ -133,16 +133,30 @@ for each bar in historical_bars:
 ## 執行範例（規劃中 CLI）
 
 ```bash
-# 跑單次回測
+# 跑單次回測（15m 候選）
 python -m twquant.backtest run \
     --strategy ema_cross_15m \
     --symbol TXF \
     --start 2020-01-01 \
     --end 2024-12-31 \
     --config configs/strategy.yaml \
-    --output results/2024_q4_v1
+    --output results/2024_q4_15m
 
-# Walk-forward
+# 跑單次回測（30m 候選）
+python -m twquant.backtest run \
+    --strategy ema_cross_30m \
+    --symbol TXF \
+    --start 2020-01-01 \
+    --end 2024-12-31 \
+    --config configs/strategy.yaml \
+    --output results/2024_q4_30m
+
+# 比較兩候選的淨 Sharpe / Calmar（Phase 1 擇優依據）
+python -m twquant.backtest compare \
+    --runs results/2024_q4_15m results/2024_q4_30m \
+    --metric calmar_net_of_cost
+
+# Walk-forward（15m / 30m 分別跑）
 python -m twquant.backtest walk_forward \
     --strategy ema_cross_15m \
     --train-window 2y \
@@ -150,6 +164,15 @@ python -m twquant.backtest walk_forward \
     --start 2018-01-01 \
     --end 2025-12-31
 ```
+
+## 雙候選比較
+
+Phase 1 須同時跑 `ema_cross_15m` 與 `ema_cross_30m`。兩者：
+
+- 使用同一份 1m 原始資料、同一份成本模型
+- 產出獨立的 `equity_curve` / `trades` / `metrics`
+- `compare` 子命令自動計算差值，輸出比較表
+- 選擇準則見 [`STRATEGY.md § 候選選擇`](STRATEGY.md#候選選擇phase-1-結論)
 
 ## 相關文件
 

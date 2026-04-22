@@ -125,11 +125,21 @@ Pull Request 觸發：
 ```yaml
 # configs/strategy.yaml
 ema_cross_15m:
+  timeframe: 15m
+  fast_period: 10
+  slow_period: 60
+  session_mode: combined
+  warmup_bars: 60
+
+ema_cross_30m:
+  timeframe: 30m
   fast_period: 10
   slow_period: 60
   session_mode: combined
   warmup_bars: 60
 ```
+
+Phase 1 同步跑 15m 與 30m 兩組，比較後擇優（見 [`STRATEGY.md`](STRATEGY.md)）。
 
 敏感資訊（API key、帳密）走環境變數或 `.env`，**永不** 進 git。
 

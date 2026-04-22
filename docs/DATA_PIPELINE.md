@@ -2,7 +2,7 @@
 
 ## 目標
 
-提供系統一份 **乾淨、連續、無跳空、時區正確** 的台指期 15 分鐘 K 棒資料，供回測與實盤使用。
+提供系統一份 **乾淨、連續、無跳空、時區正確** 的台指期 K 棒資料，供回測與實盤使用。Phase 1 同時生產 **15 分鐘** 與 **30 分鐘** 兩個週期（兩候選都要跑）；以 1 分 K 為單一真相來源（single source of truth）、向上聚合。
 
 ## 資料型別
 
@@ -13,9 +13,9 @@
 
 ### 2. K 棒（OHLCV）
 - 欄位：`datetime, open, high, low, close, volume, oi`（未平倉量）
-- 週期：1m / 5m / **15m** / 30m / 1h / 1d
+- 週期：1m / 5m / **15m** / **30m** / 1h / 1d
 - 用途：回測與策略主要輸入
-- 15m K 棒由 1m K 棒聚合產生（避免不同來源對 15m 定義不一致）
+- **15m 與 30m 一律由 1m K 棒聚合產生**（避免不同來源定義不一致，確保 30m = 兩根 15m）
 
 ### 3. 契約資訊
 - 欄位：`symbol, month, last_trading_date, settle_date, tick_size, contract_size, margin`
@@ -55,24 +55,26 @@
 - 資料庫內以 UTC 儲存，應用層轉為 Taipei
 - 夜盤跨日的 K 棒：`datetime` 採用 K 棒**結束時間**
 
-## 15 分鐘 K 棒邊界
+## K 棒邊界（15m / 30m）
 
-台指日盤 08:45 開盤，夜盤 15:00 開始。15 分鐘切分方式：
+台指日盤 08:45 開盤，夜盤 15:00 開始。切分方式：
 
-| 時段 | 切分方式 | 範例 |
+| 時段 | 15m 切分 | 30m 切分 |
 | --- | --- | --- |
-| 日盤 | 從 08:45 起每 15 分鐘一根 | 08:45-09:00 / 09:00-09:15 / ... / 13:30-13:45 |
-| 夜盤 | 從 15:00 起每 15 分鐘一根 | 15:00-15:15 / 15:15-15:30 / ... / 04:45-05:00 |
+| 日盤（08:45–13:45） | 08:45-09:00 / 09:00-09:15 / ... / 13:30-13:45（20 根） | 08:45-09:15 / 09:15-09:45 / ... / 13:15-13:45（10 根） |
+| 夜盤（15:00–05:00） | 15:00-15:15 / ... / 04:45-05:00（56 根） | 15:00-15:30 / ... / 04:30-05:00（28 根） |
 
-**重要**：第一根日盤 K 棒是 08:45–09:00（15 分鐘，非對齊整點），若資料源以 09:00 為邊界需重新聚合。
+**重要**：
+- 兩個週期的第一根日盤 K 棒皆自 08:45 起（非對齊整點）；若資料源以 09:00 為邊界需重新聚合
+- 30m 的每一根皆為連續兩根 15m 的聚合（確保兩者在同一時點對齊）
 
 ## 資料品質檢查
 
-每次 ETL 完成後自動執行：
+每次 ETL 完成後自動執行（以 15m 為主、30m 同步檢查）：
 
-| 檢查項 | 規則 | 動作 |
+| 檢查項 | 規則（15m / 30m） | 動作 |
 | --- | --- | --- |
-| K 棒缺漏 | 預期 76 根/交易日，實際 < 72 | 記錄 + 告警 |
+| K 棒缺漏 | 15m：預期 76 根/日，< 72；30m：預期 38 根/日，< 36 | 記錄 + 告警 |
 | OHLC 邏輯 | `low ≤ open, close ≤ high` | 修正或剔除 |
 | 跳空 | `abs(open[t] - close[t-1]) / close[t-1] > 3%` | 標記，不自動修 |
 | 成交量異常 | 單根 K 棒成交量 > 30 日均值 × 10 | 標記 |
@@ -82,9 +84,13 @@
 ## 儲存設計
 
 ### Phase 1：SQLite
+
+使用單張通用表，欄位 `tf` 區分週期，避免未來每新增週期就開新表：
+
 ```sql
-CREATE TABLE bars_15m (
+CREATE TABLE bars (
     symbol      TEXT    NOT NULL,        -- TXF / MXF
+    tf          TEXT    NOT NULL,        -- '1m' / '15m' / '30m' / '1d'
     month_code  TEXT,                    -- 202606 等，連續合約為 'CONT'
     ts          INTEGER NOT NULL,        -- K 棒結束時間，epoch seconds (UTC)
     open        REAL    NOT NULL,
@@ -93,14 +99,21 @@ CREATE TABLE bars_15m (
     close       REAL    NOT NULL,
     volume      INTEGER NOT NULL,
     oi          INTEGER,
-    PRIMARY KEY (symbol, month_code, ts)
+    PRIMARY KEY (symbol, tf, month_code, ts)
 );
-CREATE INDEX idx_bars_symbol_ts ON bars_15m(symbol, ts);
+CREATE INDEX idx_bars_tf_ts ON bars(tf, symbol, ts);
+```
+
+查詢範例：
+```sql
+-- 15m 候選
+SELECT * FROM bars WHERE tf = '15m' AND symbol = 'TXF' AND month_code = 'CONT';
+-- 30m 候選
+SELECT * FROM bars WHERE tf = '30m' AND symbol = 'TXF' AND month_code = 'CONT';
 ```
 
 ### Phase 3+：PostgreSQL + TimescaleDB
-- `bars_15m` 轉為 hypertable，依時間自動分區
-- 1m bars 獨立表
+- `bars` 轉為 hypertable，依 `ts` 自動分區；`tf` 作為分區外索引鍵
 - Tick 資料獨立表（可選）
 
 ## ETL 流程
@@ -116,7 +129,7 @@ CREATE INDEX idx_bars_symbol_ts ON bars_15m(symbol, ts);
                          ▲
                          │
 ┌─────────────────┐      │
-│ Shioaji 即時    │──────┘ (tick → 1m → 15m 即時聚合)
+│ Shioaji 即時    │──────┘ (tick → 1m → 15m / 30m 即時聚合)
 └─────────────────┘
 ```
 

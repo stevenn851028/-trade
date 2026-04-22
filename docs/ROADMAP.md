@@ -24,30 +24,30 @@
 
 ---
 
-## Phase 1 — 回測基礎設施 + 策略驗證
+## Phase 1 — 回測基礎設施 + 雙候選驗證
 
-**目標**：用真實歷史資料驗證 EMA10/60 15 分鐘策略是否具備統計上的正報酬。
+**目標**：用真實歷史資料驗證 EMA10/60 的 **15 分鐘** 與 **30 分鐘** 兩個候選，擇優上線。
 
 **實作項目**：
 - [ ] `src/twquant/events.py`：事件型別
-- [ ] `src/twquant/data/`：TAIFEX CSV loader、1m → 15m 聚合、連續合約串接
-- [ ] `src/twquant/strategies/ema_crossover.py`：策略實作
+- [ ] `src/twquant/data/`：TAIFEX CSV loader、1m → 15m／30m 聚合、連續合約串接
+- [ ] `src/twquant/strategies/ema_crossover.py`：單一策略類別，支援兩種 timeframe
 - [ ] `src/twquant/risk/`：基本風控（部位大小、Kill Switch）
 - [ ] `src/twquant/execution/backtest.py`：模擬撮合（含滑價、費用）
 - [ ] `src/twquant/portfolio/`：部位與權益追蹤
-- [ ] 回測 CLI：`python -m twquant.backtest run ...`
-- [ ] HTML 績效報告
+- [ ] 回測 CLI：`python -m twquant.backtest run ...` + `compare` 子命令
+- [ ] HTML 績效報告（含雙候選對照）
 - [ ] 單元測試覆蓋率 ≥ 70%
 - [ ] Walk-forward 分析工具
+- [ ] ADR：`docs/adr/0001-timeframe-selection.md`（記錄 15m vs 30m 比較結果與決策）
 
-**資料**：回補 2018–2025 1 分 K，產出 15 分鐘連續合約序列
+**資料**：回補 2018–2025 1 分 K，產出 15m + 30m 兩套連續合約序列
 
 **通過條件**（見 `BACKTEST.md` § 目標門檻）：
-- Sharpe ≥ 1.0
-- Calmar ≥ 0.5
-- MDD ≤ 30%
+- **至少一個候選** 滿足：Sharpe ≥ 1.0、Calmar ≥ 0.5、MDD ≤ 30%
 - 樣本外期間（2024–2025）績效不顯著劣於樣本內
 - Walk-forward 累計 Sharpe ≥ 0.7
+- 若兩者皆通過：按 `STRATEGY.md § 候選選擇` 擇一進入 Phase 2
 
 **未通過** → 回 Strategy 層思考：加濾網、換商品、換週期
 
@@ -61,7 +61,7 @@
 
 **實作項目**：
 - [ ] Shioaji 即時 quote 接入
-- [ ] Tick → 15m K 棒即時聚合
+- [ ] Tick → 15m / 30m K 棒即時聚合（上線者為主，另一份備查）
 - [ ] Live Executor（模擬模式：發送訊號但不真實下單）
 - [ ] 日盤 + 夜盤連續運行
 - [ ] 斷線自動重連
