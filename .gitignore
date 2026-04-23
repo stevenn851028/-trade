@@ -1,11 +1,26 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# env
 .venv/
 venv/
 .env
 .DS_Store
-*.csv
-!sample_*.csv
 .idea/
 .vscode/
+
+# 本機資料與日誌（不進 git）
+data/raw/
+data/db/
+data/bars/
+logs/
+
+# 一般 CSV 不進 git；測試固定檔除外
+*.csv
+!tests/fixtures/sample_*.csv

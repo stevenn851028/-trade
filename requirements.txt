@@ -1,2 +1,3 @@
 pandas>=2.0
+# yfinance 僅供 prototypes/ 原型使用；正式 pipeline 使用 TAIFEX 官方資料
 yfinance>=0.2.40
