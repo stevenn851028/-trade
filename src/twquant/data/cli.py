@@ -10,9 +10,12 @@
     # 單日驗證：解析 → 聚合 15m/30m → 品質檢查報告
     python -m twquant.data.cli verify --date 2026-04-15 --raw-dir data/raw
 
-    # 區間驗證：逐日解析並產出合併 CSV
-    python -m twquant.data.cli verify --start 2026-04-01 --end 2026-04-15 \\
-        --raw-dir data/raw --out-dir data/bars
+    # 載入 raw ZIP 到 SQLite DB（解析 → 聚合 → upsert，預設 15m + 30m）
+    python -m twquant.data.cli load --start 2026-04-01 --end 2026-04-15 \\
+        --raw-dir data/raw --db data/db/bars.sqlite
+
+    # 查詢 DB 統計
+    python -m twquant.data.cli stats --db data/db/bars.sqlite
 """
 
 from __future__ import annotations
@@ -28,6 +31,7 @@ import pandas as pd
 from twquant.data.archive import run_archive
 from twquant.data.bar_aggregator import aggregate_ticks_to_bars
 from twquant.data.quality import check_bars
+from twquant.data.sqlite_store import BarStore
 from twquant.data.taifex_downloader import download_date_range
 from twquant.data.tick_parser import pick_dominant_month, read_taifex_zip
 
@@ -142,6 +146,72 @@ def cmd_verify(args: argparse.Namespace) -> int:
     return 1 if failures else 0
 
 
+def cmd_load(args: argparse.Namespace) -> int:
+    """解析 raw ZIP → 聚合 → upsert 到 SQLite DB。"""
+    raw_dir = Path(args.raw_dir)
+    products = tuple(args.products.split(","))
+    timeframes = tuple(int(x) for x in args.timeframes.split(","))
+
+    dates: list[date] = []
+    if args.date:
+        dates = [args.date]
+    else:
+        d = args.start
+        while d <= args.end:
+            if d.weekday() < 5:
+                dates.append(d)
+            d += timedelta(days=1)
+
+    print(f"Loading {len(dates)} trading day(s) into {args.db}")
+    total_bars = 0
+    misses = 0
+    with BarStore(args.db) as store:
+        for trade_date in dates:
+            zip_name = f"Daily_{trade_date.year}_{trade_date.month:02d}_{trade_date.day:02d}.zip"
+            zip_path = raw_dir / zip_name
+            if not zip_path.exists():
+                print(f"  MISS {trade_date}: {zip_path} not found")
+                misses += 1
+                continue
+
+            try:
+                ticks = read_taifex_zip(zip_path, products=products, encoding=args.encoding)
+            except Exception as e:  # noqa: BLE001
+                print(f"  PARSE FAIL {trade_date}: {type(e).__name__}: {e}", file=sys.stderr)
+                continue
+
+            if ticks.empty:
+                print(f"  EMPTY {trade_date}")
+                continue
+
+            dom = pick_dominant_month(ticks, trade_date)
+            ticks_dom = ticks[ticks["contract_month"] == dom]
+
+            day_bars = 0
+            for tf in timeframes:
+                bars = aggregate_ticks_to_bars(ticks_dom, bar_size_min=tf)
+                day_bars += store.upsert_bars(bars)
+            total_bars += day_bars
+            print(f"  OK   {trade_date}: dominant={dom}, upserted={day_bars}")
+
+    print(f"Done. Total upserted bars: {total_bars}, missing days: {misses}")
+    return 0
+
+
+def cmd_stats(args: argparse.Namespace) -> int:
+    """列出 DB 內 (symbol, tf) 的筆數與時間範圍。"""
+    with BarStore(args.db) as store:
+        stats = store.stats()
+    if not stats:
+        print(f"{args.db}: empty (no bars)")
+        return 0
+    print(f"{args.db}:")
+    for (sym, tf), info in stats.items():
+        print(f"  {sym} {tf}: {info['count']:>8,} bars  "
+              f"[{info['min_ts']} → {info['max_ts']}]")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="twquant.data.cli",
                                 description="TAIFEX data pipeline CLI")
@@ -178,14 +248,30 @@ def build_parser() -> argparse.ArgumentParser:
                     help="TAIFEX CSV 編碼，預設 big5；若為新檔可能是 utf-8")
     pv.set_defaults(func=cmd_verify)
 
+    pl = sub.add_parser("load", help="解析 raw ZIP → 聚合 → upsert 到 SQLite")
+    pl.add_argument("--date", type=_parse_date, default=None)
+    pl.add_argument("--start", type=_parse_date, default=None)
+    pl.add_argument("--end", type=_parse_date, default=None)
+    pl.add_argument("--raw-dir", default="data/raw")
+    pl.add_argument("--db", default="data/db/bars.sqlite")
+    pl.add_argument("--products", default="TX")
+    pl.add_argument("--timeframes", default="15,30")
+    pl.add_argument("--encoding", default="big5")
+    pl.set_defaults(func=cmd_load)
+
+    ps = sub.add_parser("stats", help="列出 DB 內 (symbol, tf) 的筆數與時間範圍")
+    ps.add_argument("--db", default="data/db/bars.sqlite")
+    ps.set_defaults(func=cmd_stats)
+
     return p
 
 
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     args = build_parser().parse_args(argv)
-    if args.cmd == "verify" and not args.date and (args.start is None or args.end is None):
-        print("verify: either --date or --start/--end is required", file=sys.stderr)
+    if args.cmd in ("verify", "load") and not args.date \
+            and (args.start is None or args.end is None):
+        print(f"{args.cmd}: either --date or --start/--end is required", file=sys.stderr)
         return 2
     return args.func(args)
 
