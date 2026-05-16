@@ -35,6 +35,7 @@
 | [`docs/STRATEGY.md`](docs/STRATEGY.md) | EMA10/60 策略完整規格（15m、30m 兩候選）與邊界案例 |
 | [`docs/DATA_PIPELINE.md`](docs/DATA_PIPELINE.md) | 行情資料來源、清洗、儲存、連續月合約處理 |
 | [`docs/DATA_PIPELINE_FINDINGS.md`](docs/DATA_PIPELINE_FINDINGS.md) | Phase 0.5 pipeline 驗證紀錄、已確認事實、待解盲點 |
+| [`docs/OPERATIONS.md`](docs/OPERATIONS.md) | 維運手冊：日常存檔 cron / systemd 設定、故障排查 |
 | [`docs/BACKTEST.md`](docs/BACKTEST.md) | 回測框架設計、績效指標、過擬合防範 |
 | [`docs/RISK_MANAGEMENT.md`](docs/RISK_MANAGEMENT.md) | 部位大小、停損、資金管理、Kill Switch |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | Phase 0 → Phase 5 分期發展計畫 |
