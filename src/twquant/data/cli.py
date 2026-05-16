@@ -1,7 +1,10 @@
-"""TAIFEX 資料管線 CLI（Phase 0.5 — pipeline 可行性驗證用）。
+"""TAIFEX 資料管線 CLI。
 
 使用範例:
-    # 下載最近 10 個交易日的 Daily ZIP 到 data/raw/
+    # 每日排程：補齊最近 30 天遺漏的 Daily ZIP（推薦給 cron / systemd timer）
+    python -m twquant.data.cli archive --out-dir data/raw
+
+    # 手動下載指定區間
     python -m twquant.data.cli fetch --start 2026-04-01 --end 2026-04-15
 
     # 單日驗證：解析 → 聚合 15m/30m → 品質檢查報告
@@ -22,6 +25,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from twquant.data.archive import run_archive
 from twquant.data.bar_aggregator import aggregate_ticks_to_bars
 from twquant.data.quality import check_bars
 from twquant.data.taifex_downloader import download_date_range
@@ -32,6 +36,20 @@ log = logging.getLogger("twquant.data.cli")
 
 def _parse_date(s: str) -> date:
     return datetime.strptime(s, "%Y-%m-%d").date()
+
+
+def cmd_archive(args: argparse.Namespace) -> int:
+    """每日排程執行：補齊最近 N 天所有遺漏的 Daily ZIP。"""
+    summary = run_archive(
+        out_dir=args.out_dir,
+        lookback_days=args.lookback,
+        timeout=args.timeout,
+    )
+    print(summary.summary())
+    for r in summary.results:
+        if r.status == "error":
+            print(f"  ERROR {r.trade_date}: {r.error}", file=sys.stderr)
+    return 1 if summary.errors else 0
 
 
 def cmd_fetch(args: argparse.Namespace) -> int:
@@ -129,7 +147,15 @@ def build_parser() -> argparse.ArgumentParser:
                                 description="TAIFEX data pipeline CLI")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    pf = sub.add_parser("fetch", help="下載 TAIFEX Daily ZIP")
+    pa = sub.add_parser("archive",
+                        help="每日排程用：補齊最近 N 天所有遺漏的 Daily ZIP")
+    pa.add_argument("--out-dir", default="data/raw")
+    pa.add_argument("--lookback", type=int, default=30,
+                    help="回溯天數（預設 30 = TAIFEX 公開窗口）")
+    pa.add_argument("--timeout", type=int, default=30)
+    pa.set_defaults(func=cmd_archive)
+
+    pf = sub.add_parser("fetch", help="下載 TAIFEX Daily ZIP（手動指定區間）")
     pf.add_argument("--start", type=_parse_date, required=True)
     pf.add_argument("--end", type=_parse_date, required=True)
     pf.add_argument("--out-dir", default="data/raw")
