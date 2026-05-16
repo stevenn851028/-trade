@@ -14,6 +14,9 @@
     python -m twquant.data.cli load --start 2026-04-01 --end 2026-04-15 \\
         --raw-dir data/raw --db data/db/bars.sqlite
 
+    # 建立連續合約（Panama backward）：載入完後跑一次，產生 month_code='CONT' 的序列
+    python -m twquant.data.cli build-continuous --db data/db/bars.sqlite
+
     # 查詢 DB 統計
     python -m twquant.data.cli stats --db data/db/bars.sqlite
 """
@@ -31,6 +34,11 @@ import pandas as pd
 from twquant.data.archive import run_archive
 from twquant.data.bar_aggregator import aggregate_ticks_to_bars
 from twquant.data.quality import check_bars
+from twquant.data.rollover import (
+    CONTINUOUS_MONTH_CODE,
+    build_continuous_series,
+    detect_rollovers,
+)
 from twquant.data.sqlite_store import BarStore
 from twquant.data.taifex_downloader import download_date_range
 from twquant.data.tick_parser import pick_dominant_month, read_taifex_zip
@@ -198,6 +206,34 @@ def cmd_load(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_build_continuous(args: argparse.Namespace) -> int:
+    """從 DB 月份合約 bars 建出 CONT 連續序列並 upsert 回 DB。"""
+    symbol = args.symbol
+    timeframes = tuple(args.timeframes.split(","))
+
+    with BarStore(args.db) as store:
+        for tf in timeframes:
+            df = store.query_bars(symbol, tf)
+            # 排除已有的 CONT，只用月份合約資料
+            df = df[df["contract_month"] != CONTINUOUS_MONTH_CODE].copy()
+            if df.empty:
+                print(f"  {symbol} {tf}: no monthly bars in DB, skip")
+                continue
+
+            rollovers = detect_rollovers(df)
+            cont = build_continuous_series(df, rollovers=rollovers)
+
+            # query_bars 多帶了 oi 欄位，upsert 需要對齊 REQUIRED_COLS
+            cont = cont.drop(columns=[c for c in ("oi",) if c in cont.columns])
+            n = store.upsert_bars(cont)
+            print(f"  {symbol} {tf}: {len(rollovers)} rollover(s) detected, "
+                  f"{n} CONT bars upserted")
+            for ev in rollovers:
+                print(f"    {ev.date}  {ev.from_month} → {ev.to_month}  "
+                      f"offset={ev.offset:+.2f}")
+    return 0
+
+
 def cmd_stats(args: argparse.Namespace) -> int:
     """列出 DB 內 (symbol, tf) 的筆數與時間範圍。"""
     with BarStore(args.db) as store:
@@ -258,6 +294,14 @@ def build_parser() -> argparse.ArgumentParser:
     pl.add_argument("--timeframes", default="15,30")
     pl.add_argument("--encoding", default="big5")
     pl.set_defaults(func=cmd_load)
+
+    pc = sub.add_parser("build-continuous",
+                        help="從月份合約 bars 建出連續合約（Panama backward）並 upsert 回 DB")
+    pc.add_argument("--db", default="data/db/bars.sqlite")
+    pc.add_argument("--symbol", default="TX")
+    pc.add_argument("--timeframes", default="15m,30m",
+                    help="逗號分隔週期標籤（例 15m,30m）")
+    pc.set_defaults(func=cmd_build_continuous)
 
     ps = sub.add_parser("stats", help="列出 DB 內 (symbol, tf) 的筆數與時間範圍")
     ps.add_argument("--db", default="data/db/bars.sqlite")
