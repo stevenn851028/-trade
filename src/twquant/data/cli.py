@@ -173,6 +173,7 @@ def cmd_load(args: argparse.Namespace) -> int:
     print(f"Loading {len(dates)} trading day(s) into {args.db}")
     total_bars = 0
     misses = 0
+    touched_tfs: set[str] = set()
     with BarStore(args.db) as store:
         for trade_date in dates:
             zip_name = f"Daily_{trade_date.year}_{trade_date.month:02d}_{trade_date.day:02d}.zip"
@@ -199,8 +200,25 @@ def cmd_load(args: argparse.Namespace) -> int:
             for tf in timeframes:
                 bars = aggregate_ticks_to_bars(ticks_dom, bar_size_min=tf)
                 day_bars += store.upsert_bars(bars)
+                touched_tfs.add(f"{tf}m")
             total_bars += day_bars
             print(f"  OK   {trade_date}: dominant={dom}, upserted={day_bars}")
+
+        # 自動建立連續合約序列（除非 --no-continuous）
+        if not args.no_continuous and touched_tfs:
+            print("Building continuous series...")
+            for symbol in products:
+                for tf in sorted(touched_tfs):
+                    df = store.query_bars(symbol, tf)
+                    df = df[df["contract_month"] != CONTINUOUS_MONTH_CODE].copy()
+                    if df.empty:
+                        continue
+                    df = df.drop(columns=[c for c in ("oi",) if c in df.columns])
+                    rolls = detect_rollovers(df)
+                    cont = build_continuous_series(df, rollovers=rolls)
+                    cont = cont.drop(columns=[c for c in ("oi",) if c in cont.columns])
+                    n = store.upsert_bars(cont)
+                    print(f"  {symbol} {tf}: {len(rolls)} rollover(s), {n} CONT bars")
 
     print(f"Done. Total upserted bars: {total_bars}, missing days: {misses}")
     return 0
@@ -293,6 +311,8 @@ def build_parser() -> argparse.ArgumentParser:
     pl.add_argument("--products", default="TX")
     pl.add_argument("--timeframes", default="15,30")
     pl.add_argument("--encoding", default="big5")
+    pl.add_argument("--no-continuous", action="store_true",
+                    help="預設載入後自動跑 build-continuous；加此旗標跳過")
     pl.set_defaults(func=cmd_load)
 
     pc = sub.add_parser("build-continuous",

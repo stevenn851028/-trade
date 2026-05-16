@@ -27,7 +27,9 @@ from pathlib import Path
 
 import pandas as pd
 
+from twquant.backtest.report import write_html_report
 from twquant.backtest.runner import run_backtest
+from twquant.backtest.walk_forward import run_walk_forward
 from twquant.data.session import TAIPEI
 from twquant.data.sqlite_store import BarStore
 from twquant.execution import CostModel
@@ -101,7 +103,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             result.fills.to_csv(out / "fills.csv", index=False)
         (out / "metrics.json").write_text(json.dumps(asdict(result.metrics),
                                                      indent=2, default=str))
-        (out / "config.json").write_text(json.dumps({
+        config = {
             "strategy": args.strategy,
             "symbol": args.symbol,
             "start": str(args.start),
@@ -110,7 +112,19 @@ def cmd_run(args: argparse.Namespace) -> int:
             "timeframe": strategy.timeframe,
             "fast_period": strategy.fast_period,
             "slow_period": strategy.slow_period,
-        }, indent=2))
+        }
+        (out / "config.json").write_text(json.dumps(config, indent=2))
+
+        if not args.no_html:
+            html_path = write_html_report(
+                out / "report.html",
+                strategy_name=strategy.name,
+                config=config,
+                metrics=result.metrics,
+                equity_df=result.equity_curve,
+                trades_df=result.trades,
+            )
+            print(f"Wrote HTML report: {html_path}")
         print(f"Wrote results to {out}/")
     return 0
 
@@ -134,6 +148,71 @@ def _print_metrics(m, name, start, end, n_bars):
     print(f"  Profit factor    {m.profit_factor:>+8.2f}")
     print(f"  Avg trade P&L    {m.avg_trade_pnl:>+11.0f}")
     print("=" * 60)
+
+
+def cmd_walk_forward(args: argparse.Namespace) -> int:
+    if args.strategy not in STRATEGIES:
+        print(f"unknown strategy: {args.strategy}", file=sys.stderr)
+        return 2
+
+    strategy_factory = STRATEGIES[args.strategy]
+    cost_model = COST_MODELS[args.symbol]()
+    start = _date_to_taipei_dt(args.start)
+    end = _date_to_taipei_dt(args.end, end_of_day=True)
+
+    timeframe = strategy_factory().timeframe
+    with BarStore(args.db) as store:
+        bars = store.query_bars(args.symbol, timeframe,
+                                start=start, end=end,
+                                month_code="CONT")
+    if bars.empty:
+        print("No CONT bars in range", file=sys.stderr)
+        return 1
+    print(f"Loaded {len(bars):,} bars; running walk-forward "
+          f"train={args.train_months}m / test={args.test_months}m")
+
+    result = run_walk_forward(
+        bars,
+        strategy_factory,
+        train_months=args.train_months,
+        test_months=args.test_months,
+        initial_cash=args.capital,
+        cost_model=cost_model,
+    )
+
+    print("=" * 60)
+    print(f"Walk-forward: {result.strategy_name}")
+    print(f"  windows: {len(result.windows)}")
+    for w, m in zip(result.windows, result.per_window_metrics):
+        print(f"   [{w.test_start} → {w.test_end}]  "
+              f"return={m.total_return_pct:+.2f}%  Sharpe={m.sharpe:+.2f}  "
+              f"trades={m.num_trades}  win={m.win_rate_pct:.1f}%")
+    print("-" * 60)
+    cm = result.combined_metrics
+    print(f"Combined (test-only quasi-OOS):")
+    print(f"  Total return  {cm.total_return_pct:+.2f}%")
+    print(f"  Sharpe        {cm.sharpe:+.2f}")
+    print(f"  Calmar        {cm.calmar:+.2f}")
+    print(f"  Max drawdown  {cm.max_drawdown_pct:+.2f}%")
+    print(f"  Trades        {cm.num_trades}")
+    print(f"  Win rate      {cm.win_rate_pct:.2f}%")
+    print("=" * 60)
+
+    if args.output:
+        out = Path(args.output)
+        out.mkdir(parents=True, exist_ok=True)
+        result.combined_equity.to_csv(out / "wf_equity.csv", index=False)
+        result.combined_trades.to_csv(out / "wf_trades.csv", index=False)
+        rows = [{
+            "test_start": str(w.test_start),
+            "test_end": str(w.test_end),
+            **asdict(m),
+        } for w, m in zip(result.windows, result.per_window_metrics)]
+        pd.DataFrame(rows).to_csv(out / "wf_windows.csv", index=False)
+        (out / "wf_combined_metrics.json").write_text(
+            json.dumps(asdict(cm), indent=2, default=str))
+        print(f"Wrote walk-forward results to {out}/")
+    return 0
 
 
 def cmd_compare(args: argparse.Namespace) -> int:
@@ -180,8 +259,22 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--end", type=_parse_date, required=True)
     pr.add_argument("--capital", type=float, default=1_000_000)
     pr.add_argument("--output", default=None,
-                    help="若指定則寫出 equity / trades / metrics 等 CSV/JSON")
+                    help="若指定則寫出 equity / trades / metrics 等 CSV/JSON 與 HTML 報告")
+    pr.add_argument("--no-html", action="store_true",
+                    help="跳過 HTML 報告產生")
     pr.set_defaults(func=cmd_run)
+
+    pw = sub.add_parser("walk-forward", help="跑 walk-forward 分析")
+    pw.add_argument("--strategy", required=True, choices=list(STRATEGIES.keys()))
+    pw.add_argument("--db", default="data/db/bars.sqlite")
+    pw.add_argument("--symbol", default="TX", choices=list(COST_MODELS.keys()))
+    pw.add_argument("--start", type=_parse_date, required=True)
+    pw.add_argument("--end", type=_parse_date, required=True)
+    pw.add_argument("--train-months", type=int, default=24)
+    pw.add_argument("--test-months", type=int, default=6)
+    pw.add_argument("--capital", type=float, default=1_000_000)
+    pw.add_argument("--output", default=None)
+    pw.set_defaults(func=cmd_walk_forward)
 
     pc = sub.add_parser("compare", help="並列比較多次回測的結果")
     pc.add_argument("runs", nargs="+", help="results/run_* 目錄")

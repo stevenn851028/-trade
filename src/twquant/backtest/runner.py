@@ -24,6 +24,7 @@ from twquant.events import BarEvent, FillEvent, OrderEvent, SignalEvent
 from twquant.execution import BacktestExecutor, CostModel
 from twquant.portfolio import Portfolio
 from twquant.risk import RiskManager
+from twquant.risk.manager import PortfolioSnapshot
 from twquant.strategies.base import Strategy
 
 
@@ -101,6 +102,7 @@ def run_backtest(
     fills_log: list[FillEvent] = []
 
     pending_order: OrderEvent | None = None
+    peak_equity = initial_cash
 
     for bar in bars:
         # 1. 先處理「前一根收盤」產生、要在「本根開盤」執行的訂單
@@ -112,12 +114,21 @@ def run_backtest(
 
         # 2. mark-to-market with current bar close
         portfolio.on_bar(bar)
+        current_equity = portfolio.equity_curve[-1][1] if portfolio.equity_curve else initial_cash
+        if current_equity > peak_equity:
+            peak_equity = current_equity
 
         # 3. 策略消化本根 K 棒，可能產生訊號（給下一根執行）
         signal = strategy.on_bar(bar)
         if signal is not None:
             signals_log.append(signal)
-            order = risk_manager.on_signal(signal, portfolio.position_lots)
+            snapshot = PortfolioSnapshot(
+                cash=portfolio.cash,
+                equity=current_equity,
+                peak_equity=peak_equity,
+                position_lots=portfolio.position_lots,
+            )
+            order = risk_manager.on_signal(signal, snapshot)
             if order is not None:
                 orders_log.append(order)
                 pending_order = order
