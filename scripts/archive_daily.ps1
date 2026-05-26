@@ -31,7 +31,7 @@ $Timeout = if ($env:ARCHIVE_TIMEOUT) { $env:ARCHIVE_TIMEOUT } else { 30 }
 
 # 執行並把 stdout + stderr 寫進 log（append）
 $Stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss zzz"
-Add-Content -Path $LogFile -Value "===== $Stamp archive run ====="
+Add-Content -Path $LogFile -Value "===== $Stamp archive run =====" -Encoding utf8
 
 $OutDir = Join-Path $ProjectDir "data\raw"
 $cmdArgs = @(
@@ -41,11 +41,13 @@ $cmdArgs = @(
     "--timeout", $Timeout
 )
 
-# 用 2>&1 合併兩個 stream，再以 Out-File append
-& python @cmdArgs 2>&1 | Out-File -FilePath $LogFile -Encoding utf8 -Append
+# 注意：Python logging 預設寫 stderr，PowerShell 會把 stderr 包成 ErrorRecord 物件。
+# 用 `Out-String -Stream` 把所有物件（含 ErrorRecord）轉成單純字串，
+# 避免 log 裡塞一堆 NativeCommandError / RemoteException 雜訊。
+& python @cmdArgs 2>&1 | Out-String -Stream | Add-Content -Path $LogFile -Encoding utf8
 $ExitCode = $LASTEXITCODE
 
-Add-Content -Path $LogFile -Value "===== exit=$ExitCode ====="
-Add-Content -Path $LogFile -Value ""
+Add-Content -Path $LogFile -Value "===== exit=$ExitCode =====" -Encoding utf8
+Add-Content -Path $LogFile -Value "" -Encoding utf8
 
 exit $ExitCode
