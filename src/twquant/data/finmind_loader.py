@@ -97,9 +97,11 @@ class FinMindClient:
 def consolidate_daily_bars(raw_df: pd.DataFrame) -> pd.DataFrame:
     """將 FinMind raw 日線（含 regular / after_market）合併為單一日線記錄。
 
-    輸入欄位（FinMind TaiwanFuturesDaily）:
-        date, futures_id, contract_date, open, high, low, close, volume,
+    輸入欄位（FinMind TaiwanFuturesDaily 實際回傳）:
+        date, futures_id, contract_date, open, max, min, close, volume,
         settlement_price, open_interest, trading_session
+
+    注意 FinMind 用 `max` / `min` 而非 `high` / `low`，本函式自動正規化。
 
     輸出欄位（對齊 sqlite bars schema 風格）:
         ts (Taipei tz, 設為 13:45 為日盤收盤；夜盤合併進來），timeframe='1d',
@@ -110,6 +112,11 @@ def consolidate_daily_bars(raw_df: pd.DataFrame) -> pd.DataFrame:
                                      "open", "high", "low", "close", "volume", "oi"])
 
     df = raw_df.copy()
+    # 正規化欄位：FinMind 用 max/min，內部統一改為 high/low
+    if "high" not in df.columns and "max" in df.columns:
+        df = df.rename(columns={"max": "high"})
+    if "low" not in df.columns and "min" in df.columns:
+        df = df.rename(columns={"min": "low"})
     df["contract_date"] = df["contract_date"].astype(str).str.strip()
 
     grouped = df.groupby(["date", "futures_id", "contract_date"], as_index=False)

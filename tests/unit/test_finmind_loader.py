@@ -107,6 +107,27 @@ class TestConsolidate:
         assert len(out) == 2
         assert set(out["contract_month"]) == {"202401", "202402"}
 
+    def test_real_finmind_uses_max_min_columns(self):
+        """FinMind TaiwanFuturesDaily 實際回傳用 max/min 而非 high/low。
+        consolidate_daily_bars 應自動正規化。"""
+        rows = [
+            {"date": "2024-01-02", "futures_id": "TX", "contract_date": "202401",
+             "open": 17500.0, "max": 17600.0, "min": 17400.0, "close": 17550.0,
+             "spread": 0, "spread_per": 0, "volume": 80000,
+             "settlement_price": 17550.0, "open_interest": 70000,
+             "trading_session": "regular"},
+            {"date": "2024-01-02", "futures_id": "TX", "contract_date": "202401",
+             "open": 17560.0, "max": 17700.0, "min": 17500.0, "close": 17650.0,
+             "spread": 0, "spread_per": 0, "volume": 20000,
+             "settlement_price": 17650.0, "open_interest": 70500,
+             "trading_session": "after_market"},
+        ]
+        out = consolidate_daily_bars(pd.DataFrame(rows))
+        assert len(out) == 1
+        assert out.iloc[0]["high"] == 17700.0
+        assert out.iloc[0]["low"] == 17400.0
+        assert out.iloc[0]["volume"] == 100000
+
     def test_ts_set_to_taipei_1345(self):
         rows = [
             {"date": "2024-01-02", "futures_id": "TX", "contract_date": "202401",
