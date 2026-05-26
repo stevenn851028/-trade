@@ -17,6 +17,10 @@
     # 建立連續合約（Panama backward）：載入完後跑一次，產生 month_code='CONT' 的序列
     python -m twquant.data.cli build-continuous --db data/db/bars.sqlite
 
+    # 從 FinMind 免費 API 拉日線歷史（用於跨來源對帳、日線趨勢濾網）
+    python -m twquant.data.cli finmind-import --start 2018-01-01 --end 2025-12-31 \\
+        --db data/db/bars.sqlite
+
     # 查詢 DB 統計
     python -m twquant.data.cli stats --db data/db/bars.sqlite
 """
@@ -33,6 +37,7 @@ import pandas as pd
 
 from twquant.data.archive import run_archive
 from twquant.data.bar_aggregator import aggregate_ticks_to_bars
+from twquant.data.finmind_loader import FinMindClient, FinMindError, consolidate_daily_bars
 from twquant.data.quality import check_bars
 from twquant.data.rollover import (
     CONTINUOUS_MONTH_CODE,
@@ -224,6 +229,46 @@ def cmd_load(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_finmind_import(args: argparse.Namespace) -> int:
+    """從 FinMind 拉日線歷史並 upsert 到 SQLite。
+
+    僅日線（tf='1d'），用於跨來源對帳與長期趨勢濾網。
+    無法用於 15m / 30m 策略本身。
+    """
+    client = FinMindClient(token=args.token)
+    products = tuple(args.products.split(","))
+
+    with BarStore(args.db) as store:
+        for product in products:
+            print(f"FinMind {product} {args.start}..{args.end}")
+            try:
+                raw = client.fetch_taiwan_futures_daily(
+                    product=product, start=args.start, end=args.end)
+            except FinMindError as e:
+                print(f"  ERROR: {e}", file=sys.stderr)
+                return 1
+
+            if raw.empty:
+                print(f"  no data")
+                continue
+            print(f"  raw rows: {len(raw):,}")
+
+            bars = consolidate_daily_bars(raw)
+            print(f"  consolidated daily bars: {len(bars):,}")
+
+            n = store.upsert_bars(bars.drop(columns=["oi"]))
+            print(f"  upserted: {n:,}")
+
+            if not args.no_continuous:
+                bars_no_cont = bars[bars["contract_month"] != CONTINUOUS_MONTH_CODE].copy()
+                bars_no_cont = bars_no_cont.drop(columns=["oi"])
+                rolls = detect_rollovers(bars_no_cont)
+                cont = build_continuous_series(bars_no_cont, rolls)
+                n_cont = store.upsert_bars(cont)
+                print(f"  {product} 1d CONT: {len(rolls)} rollover(s), {n_cont} bars")
+    return 0
+
+
 def cmd_build_continuous(args: argparse.Namespace) -> int:
     """從 DB 月份合約 bars 建出 CONT 連續序列並 upsert 回 DB。"""
     symbol = args.symbol
@@ -314,6 +359,19 @@ def build_parser() -> argparse.ArgumentParser:
     pl.add_argument("--no-continuous", action="store_true",
                     help="預設載入後自動跑 build-continuous；加此旗標跳過")
     pl.set_defaults(func=cmd_load)
+
+    pfm = sub.add_parser("finmind-import",
+                         help="從 FinMind 免費 API 拉日線歷史並 upsert 到 SQLite")
+    pfm.add_argument("--db", default="data/db/bars.sqlite")
+    pfm.add_argument("--products", default="TX",
+                     help="逗號分隔商品代號（例 TX,MTX）")
+    pfm.add_argument("--start", type=_parse_date, required=True)
+    pfm.add_argument("--end", type=_parse_date, required=True)
+    pfm.add_argument("--token", default=None,
+                     help="FinMind token；不指定則讀環境變數 FINMIND_TOKEN，無 token 也可")
+    pfm.add_argument("--no-continuous", action="store_true",
+                     help="跳過自動 build-continuous")
+    pfm.set_defaults(func=cmd_finmind_import)
 
     pc = sub.add_parser("build-continuous",
                         help="從月份合約 bars 建出連續合約（Panama backward）並 upsert 回 DB")
