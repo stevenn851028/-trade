@@ -137,15 +137,75 @@ launchctl list | grep twquant
 
 #### Windows — Task Scheduler
 
-1. 開啟「工作排程器」→ 建立基本工作
-2. 名稱：`TWQuant TAIFEX Archive`
-3. 觸發程序：每日 07:00
-4. 動作：啟動程式
-   - 程式：`C:\path\to\python.exe`
-   - 引數：`-m twquant.data.cli archive --out-dir data\raw`
-   - 開始位置：`C:\path\to\-trade`
+最簡單方式：呼叫專案內附的 `scripts/archive_daily.ps1`。
 
-或寫一個 `archive_daily.bat` 對應 bash 腳本，再讓排程呼叫它。
+**Step 1：第一次先手動跑一次驗證**
+
+在 PowerShell（venv 啟用後）跑：
+```powershell
+.\scripts\archive_daily.ps1
+Get-Content logs\archive_*.log -Tail 5
+```
+
+最後一行應該看到 `exit=0`。
+
+**Step 2：用 PowerShell 建立排程任務（一鍵建立，比 GUI 快）**
+
+在 PowerShell 把下面這段整個複製貼上（**`<>` 內換成你的實際路徑**）：
+
+```powershell
+$projectDir = "C:\Users\steven\Documents\GitHub\-trade"   # ← 改成你的
+$psExe = (Get-Command powershell).Source
+$psArgs = "-NoProfile -ExecutionPolicy Bypass -File `"$projectDir\scripts\archive_daily.ps1`""
+$action = New-ScheduledTaskAction -Execute $psExe -Argument $psArgs -WorkingDirectory $projectDir
+$trigger = New-ScheduledTaskTrigger -Daily -At 7:00am
+$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd `
+    -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 5)
+Register-ScheduledTask -TaskName "TWQuant Archive" `
+    -Action $action -Trigger $trigger -Settings $settings `
+    -Description "Download TAIFEX Daily ZIP daily at 07:00"
+```
+
+說明：
+- 每日 07:00 觸發
+- 錯過時間（電腦關機）下次開機自動補跑（`-StartWhenAvailable`）
+- 網路暫時不通可重試 3 次（`-RestartCount 3`）
+
+**Step 3：驗證**
+
+```powershell
+Get-ScheduledTask -TaskName "TWQuant Archive"
+```
+
+或手動觸發測試：
+```powershell
+Start-ScheduledTask -TaskName "TWQuant Archive"
+Start-Sleep -Seconds 30
+Get-Content logs\archive_*.log -Tail 10
+```
+
+**移除任務**
+```powershell
+Unregister-ScheduledTask -TaskName "TWQuant Archive" -Confirm:$false
+```
+
+#### Windows — Task Scheduler GUI 方式（不想用 PowerShell 建立的話）
+
+1. `Win` + `R` → 輸入 `taskschd.msc` → Enter
+2. 右側面板 **建立基本工作**
+3. 名稱：`TWQuant Archive`
+4. 觸發程序：**每日** → 開始時間 `07:00:00`
+5. 動作：**啟動程式**
+   - 程式或指令碼：`powershell`
+   - 新增引數：
+     ```
+     -NoProfile -ExecutionPolicy Bypass -File "C:\Users\steven\Documents\GitHub\-trade\scripts\archive_daily.ps1"
+     ```
+   - 開始位置：`C:\Users\steven\Documents\GitHub\-trade`
+6. 勾選「**開啟內容對話方塊**」→ 完成
+7. 在跳出的內容對話方塊：
+   - **設定** 分頁 → 勾選「**在排定時間開始時若工作未執行**」（錯過自動補跑）
+   - 確定
 
 ### 驗證已正常運作
 
