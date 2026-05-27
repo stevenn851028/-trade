@@ -42,6 +42,11 @@ STRATEGIES = {
     "ema_cross_15m": lambda: EmaCrossover(fast_period=10, slow_period=60, timeframe="15m"),
     "ema_cross_30m": lambda: EmaCrossover(fast_period=10, slow_period=60, timeframe="30m"),
     "ema_cross_1d": lambda: EmaCrossover(fast_period=10, slow_period=60, timeframe="1d"),
+    # 加日線 EMA200 趨勢濾網：只在 close > EMA200 時允許黃金交叉進場
+    "ema_cross_1d_t200": lambda: EmaCrossover(
+        fast_period=10, slow_period=60, timeframe="1d", trend_period=200),
+    "ema_cross_1d_t100": lambda: EmaCrossover(
+        fast_period=10, slow_period=60, timeframe="1d", trend_period=100),
 }
 
 COST_MODELS = {

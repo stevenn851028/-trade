@@ -53,16 +53,21 @@ class IncrementalEMA:
 
 @dataclass
 class EmaCrossover(Strategy):
-    """EMA10 / EMA60 黃金 / 死亡交叉。"""
+    """EMA10 / EMA60 黃金 / 死亡交叉。可選用較長 EMA 作為趨勢濾網。"""
 
     fast_period: int = 10
     slow_period: int = 60
     timeframe: str = "15m"
+    trend_period: int = 0     # 0 = 無濾網；> 0 則啟用 close > EMA(trend) 作為進場條件
 
     def __post_init__(self):
-        self.name = f"ema_cross_{self.timeframe}"
+        suffix = f"_t{self.trend_period}" if self.trend_period > 0 else ""
+        self.name = f"ema_cross_{self.timeframe}{suffix}"
         self._fast = IncrementalEMA(self.fast_period)
         self._slow = IncrementalEMA(self.slow_period)
+        self._trend: IncrementalEMA | None = (
+            IncrementalEMA(self.trend_period) if self.trend_period > 0 else None
+        )
         self._prev_fast: float | None = None
         self._prev_slow: float | None = None
         self._target: Direction = Direction.FLAT
@@ -88,8 +93,13 @@ class EmaCrossover(Strategy):
 
         self._fast.update(bar.close)
         self._slow.update(bar.close)
+        if self._trend is not None:
+            self._trend.update(bar.close)
 
+        # 三條 EMA（若啟用 trend）都要 ready 才能產訊號
         if not (self._fast.ready and self._slow.ready):
+            return None
+        if self._trend is not None and not self._trend.ready:
             return None
 
         f, s = self._fast.value, self._slow.value
@@ -99,9 +109,15 @@ class EmaCrossover(Strategy):
             crossed_up = self._prev_fast <= self._prev_slow and f > s
             crossed_down = self._prev_fast >= self._prev_slow and f < s
 
+            # 進場：黃金交叉 + 趨勢濾網（若啟用）
             if crossed_up and self._target == Direction.FLAT:
-                self._target = Direction.LONG
-                signal = SignalEvent(bar.ts, Direction.LONG, "golden_cross")
+                trend_ok = (self._trend is None) or (bar.close > self._trend.value)
+                if trend_ok:
+                    self._target = Direction.LONG
+                    signal = SignalEvent(bar.ts, Direction.LONG, "golden_cross")
+                # 否則：訊號被濾掉，但 prev_fast / prev_slow 照常更新
+
+            # 出場：死亡交叉一律允許
             elif crossed_down and self._target == Direction.LONG:
                 self._target = Direction.FLAT
                 signal = SignalEvent(bar.ts, Direction.FLAT, "death_cross")

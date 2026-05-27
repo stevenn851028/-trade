@@ -103,3 +103,68 @@ class TestEmaCrossover:
         # 繼續往上拉，不該再產 signal
         for i in range(5):
             assert s.on_bar(make_bar(t0 + timedelta(minutes=75 + 15 * i), 300.0)) is None
+
+
+class TestTrendFilter:
+    def test_name_reflects_trend_period(self):
+        s = EmaCrossover(timeframe="1d", trend_period=200)
+        assert s.name == "ema_cross_1d_t200"
+
+    def test_no_filter_when_trend_period_zero(self):
+        s = EmaCrossover(fast_period=2, slow_period=4, timeframe="15m", trend_period=0)
+        assert s._trend is None
+        # 不需暖機 trend，行為與無濾網版一致
+        t0 = datetime(2026, 4, 15, 9, 0, tzinfo=TAIPEI)
+        for i in range(4):
+            s.on_bar(make_bar(t0 + timedelta(minutes=15 * i), 100.0))
+        sig = s.on_bar(make_bar(t0 + timedelta(minutes=60), 200.0))
+        assert sig is not None and sig.target == Direction.LONG
+
+    def test_trend_filter_blocks_entry_when_close_below_trend(self):
+        """大波段下跌後反彈，雖快慢線黃金交叉，但 close 仍低於長期趨勢線 → 阻擋進場。
+
+        Pattern：10x200 (trend 暖機) → 5x80 (大跌)→ 1x110 (反彈製造黃金交叉)
+        經手算 EMA：第 16 根 close=110 vs trend≈129 → 濾網應擋掉訊號。
+        """
+        s = EmaCrossover(fast_period=2, slow_period=4, timeframe="15m",
+                         trend_period=10)
+        t0 = datetime(2026, 4, 15, 9, 0, tzinfo=TAIPEI)
+        bars = [200.0] * 10 + [80.0] * 5 + [110.0]
+        sig = None
+        for i, p in enumerate(bars):
+            sig = s.on_bar(make_bar(t0 + timedelta(minutes=15 * i), p))
+        # 最後那根本來會黃金交叉，但被趨勢濾網擋掉
+        assert sig is None
+        assert s.current_target == Direction.FLAT
+
+    def test_trend_filter_allows_entry_when_close_above_trend(self):
+        """大波段橫盤後爆漲：close > trend → 允許進場。
+
+        Pattern：10x100 (trend=100) → 1x150 (close 遠大於 trend)
+        """
+        s = EmaCrossover(fast_period=2, slow_period=4, timeframe="15m",
+                         trend_period=10)
+        t0 = datetime(2026, 4, 15, 9, 0, tzinfo=TAIPEI)
+        bars = [100.0] * 10 + [150.0]
+        sig = None
+        for i, p in enumerate(bars):
+            sig = s.on_bar(make_bar(t0 + timedelta(minutes=15 * i), p))
+        assert sig is not None
+        assert sig.target == Direction.LONG
+
+    def test_death_cross_unaffected_by_filter(self):
+        """趨勢濾網只攔進場，平倉一律允許。"""
+        s = EmaCrossover(fast_period=2, slow_period=4, timeframe="15m",
+                         trend_period=10)
+        t0 = datetime(2026, 4, 15, 9, 0, tzinfo=TAIPEI)
+
+        # 先建立 LONG 部位（黃金交叉）：10x100 + 1x150
+        for i, p in enumerate([100.0] * 10 + [150.0]):
+            s.on_bar(make_bar(t0 + timedelta(minutes=15 * i), p))
+        assert s.current_target == Direction.LONG
+
+        # 急殺：1x80 應觸發死亡交叉（即便 close < trend，亦應允許出場）
+        sig = s.on_bar(make_bar(t0 + timedelta(minutes=15 * 11), 80.0))
+        assert sig is not None
+        assert sig.target == Direction.FLAT
+        assert sig.reason == "death_cross"
