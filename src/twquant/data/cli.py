@@ -21,6 +21,11 @@
     python -m twquant.data.cli finmind-import --start 2018-01-01 --end 2025-12-31 \\
         --db data/db/bars.sqlite
 
+    # 從永豐 Shioaji 拉 2 年 1m 歷史 + 自動聚合 15m/30m
+    # （需先 pip install shioaji、開永豐戶、設環境變數 SHIOAJI_API_KEY / SHIOAJI_SECRET_KEY）
+    python -m twquant.data.cli shioaji-import --start 2024-01-01 --end 2025-12-31 \\
+        --db data/db/bars.sqlite --symbol TXFR1
+
     # 查詢 DB 統計
     python -m twquant.data.cli stats --db data/db/bars.sqlite
 """
@@ -36,13 +41,18 @@ from pathlib import Path
 import pandas as pd
 
 from twquant.data.archive import run_archive
-from twquant.data.bar_aggregator import aggregate_ticks_to_bars
+from twquant.data.bar_aggregator import aggregate_bars_to_higher, aggregate_ticks_to_bars
 from twquant.data.finmind_loader import FinMindClient, FinMindError, consolidate_daily_bars
 from twquant.data.quality import check_bars
 from twquant.data.rollover import (
     CONTINUOUS_MONTH_CODE,
     build_continuous_series,
     detect_rollovers,
+)
+from twquant.data.shioaji_loader import (
+    ShioajiClient,
+    ShioajiNotInstalled,
+    credentials_from_env,
 )
 from twquant.data.sqlite_store import BarStore
 from twquant.data.taifex_downloader import download_date_range
@@ -229,6 +239,54 @@ def cmd_load(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_shioaji_import(args: argparse.Namespace) -> int:
+    """從 Shioaji 拉 1m 歷史並聚合 15m/30m，全部 upsert 到 SQLite。"""
+    if args.api_key and args.secret_key:
+        api_key, secret_key = args.api_key, args.secret_key
+    else:
+        try:
+            api_key, secret_key = credentials_from_env()
+        except RuntimeError as e:
+            print(f"  ERROR: {e}", file=sys.stderr)
+            return 2
+
+    try:
+        client = ShioajiClient(api_key=api_key, secret_key=secret_key,
+                               simulation=args.simulation)
+    except Exception as e:  # noqa: BLE001
+        print(f"  ERROR creating client: {e}", file=sys.stderr)
+        return 1
+
+    try:
+        with client, BarStore(args.db) as store:
+            print(f"Shioaji {args.symbol} 1m {args.start}..{args.end}")
+            try:
+                bars_1m = client.fetch_1m_kbars(args.symbol, args.start, args.end)
+            except ShioajiNotInstalled as e:
+                print(f"  ERROR: {e}", file=sys.stderr)
+                return 2
+
+            if bars_1m.empty:
+                print("  no data returned")
+                return 1
+            print(f"  raw 1m bars: {len(bars_1m):,}")
+
+            # 存 1m
+            n1 = store.upsert_bars(bars_1m)
+            print(f"  upserted 1m: {n1:,}")
+
+            # 聚合 15m / 30m 並存
+            for tf in [int(x) for x in args.timeframes.split(",")]:
+                higher = aggregate_bars_to_higher(bars_1m, target_bar_min=tf,
+                                                  target_label=f"{tf}m")
+                n = store.upsert_bars(higher)
+                print(f"  upserted {tf}m: {n:,}")
+    except Exception as e:  # noqa: BLE001
+        print(f"  ERROR: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def cmd_finmind_import(args: argparse.Namespace) -> int:
     """從 FinMind 拉日線歷史並 upsert 到 SQLite。
 
@@ -359,6 +417,23 @@ def build_parser() -> argparse.ArgumentParser:
     pl.add_argument("--no-continuous", action="store_true",
                     help="預設載入後自動跑 build-continuous；加此旗標跳過")
     pl.set_defaults(func=cmd_load)
+
+    psj = sub.add_parser("shioaji-import",
+                         help="從永豐 Shioaji 拉 1m 歷史並聚合 15m/30m，全部 upsert")
+    psj.add_argument("--db", default="data/db/bars.sqlite")
+    psj.add_argument("--symbol", default="TXFR1",
+                     help="Shioaji 期貨符號（TXFR1=台指近月連續、MXFR1=小台近月）")
+    psj.add_argument("--start", type=_parse_date, required=True)
+    psj.add_argument("--end", type=_parse_date, required=True)
+    psj.add_argument("--timeframes", default="15,30",
+                     help="逗號分隔聚合目標分鐘數")
+    psj.add_argument("--api-key", default=None,
+                     help="覆寫環境變數 SHIOAJI_API_KEY")
+    psj.add_argument("--secret-key", default=None,
+                     help="覆寫環境變數 SHIOAJI_SECRET_KEY")
+    psj.add_argument("--simulation", action="store_true",
+                     help="連線測試環境（不正式登入）")
+    psj.set_defaults(func=cmd_shioaji_import)
 
     pfm = sub.add_parser("finmind-import",
                          help="從 FinMind 免費 API 拉日線歷史並 upsert 到 SQLite")
