@@ -41,6 +41,7 @@ log = logging.getLogger(__name__)
 STRATEGIES = {
     "ema_cross_15m": lambda: EmaCrossover(fast_period=10, slow_period=60, timeframe="15m"),
     "ema_cross_30m": lambda: EmaCrossover(fast_period=10, slow_period=60, timeframe="30m"),
+    "ema_cross_1d": lambda: EmaCrossover(fast_period=10, slow_period=60, timeframe="1d"),
 }
 
 COST_MODELS = {
