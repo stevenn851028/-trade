@@ -71,6 +71,14 @@ class EmaCrossover(Strategy):
     def current_target(self) -> Direction:
         return self._target
 
+    def reset_position(self) -> None:
+        """重設 position-tracking 狀態（不影響 EMA 內部狀態）。
+
+        用途：walk-forward 在訓練期暖機完後，將策略「視為剛開始」
+        的乾淨狀態進入測試期，避免訓練期的部位狀態洩漏到測試報酬。
+        """
+        self._target = Direction.FLAT
+
     def on_bar(self, bar: BarEvent) -> SignalEvent | None:
         # 完整性檢查（避免被錯誤週期的資料汙染）
         if bar.timeframe != self.timeframe:
