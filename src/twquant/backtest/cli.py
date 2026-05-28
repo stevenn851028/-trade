@@ -34,6 +34,7 @@ from twquant.data.session import TAIPEI
 from twquant.data.sqlite_store import BarStore
 from twquant.execution import CostModel
 from twquant.strategies.ema_crossover import EmaCrossover
+from twquant.strategies.kd_ema import KdEmaStrategy
 
 log = logging.getLogger(__name__)
 
@@ -47,6 +48,10 @@ STRATEGIES = {
         fast_period=10, slow_period=60, timeframe="1d", trend_period=200),
     "ema_cross_1d_t100": lambda: EmaCrossover(
         fast_period=10, slow_period=60, timeframe="1d", trend_period=100),
+    # KD + EMA 組合（方式 1：EMA 定方向 + KD 低檔黃金交叉抓時機）
+    "kd_ema_15m": lambda: KdEmaStrategy(timeframe="15m"),
+    "kd_ema_30m": lambda: KdEmaStrategy(timeframe="30m"),
+    "kd_ema_1d": lambda: KdEmaStrategy(timeframe="1d"),
 }
 
 COST_MODELS = {
