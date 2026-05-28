@@ -72,10 +72,10 @@ class RiskManager:
 
         if signal.target == Direction.LONG and snapshot.position_lots == 0:
             if killed:
-                log.info("entry blocked by kill switch")
+                log.debug("entry blocked by kill switch")
                 return None
             if not self._margin_ok(snapshot, self.config.fixed_lots):
-                log.info("entry blocked by margin cap")
+                log.debug("entry blocked by margin cap")
                 return None
             return OrderEvent(
                 ts=signal.ts,
