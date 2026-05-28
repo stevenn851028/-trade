@@ -21,7 +21,7 @@ import argparse
 import json
 import logging
 import sys
-from dataclasses import asdict
+from dataclasses import asdict, fields as dc_fields, is_dataclass
 from datetime import date, datetime
 from pathlib import Path
 
@@ -121,10 +121,12 @@ def cmd_run(args: argparse.Namespace) -> int:
             "end": str(args.end),
             "capital": args.capital,
             "timeframe": strategy.timeframe,
-            "fast_period": strategy.fast_period,
-            "slow_period": strategy.slow_period,
         }
-        (out / "config.json").write_text(json.dumps(config, indent=2))
+        # 通用擷取策略宣告參數（不同策略類別參數不同）
+        if is_dataclass(strategy):
+            for f in dc_fields(strategy):
+                config[f.name] = getattr(strategy, f.name)
+        (out / "config.json").write_text(json.dumps(config, indent=2, default=str))
 
         if not args.no_html:
             html_path = write_html_report(
