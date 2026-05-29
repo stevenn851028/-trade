@@ -108,7 +108,7 @@ class TestEmaCrossover:
 class TestTrendFilter:
     def test_name_reflects_trend_period(self):
         s = EmaCrossover(timeframe="1d", trend_period=200)
-        assert s.name == "ema_cross_1d_t200"
+        assert s.name == "ema_cross_1d_10_60_t200"
 
     def test_no_filter_when_trend_period_zero(self):
         s = EmaCrossover(fast_period=2, slow_period=4, timeframe="15m", trend_period=0)

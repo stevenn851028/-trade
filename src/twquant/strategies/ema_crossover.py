@@ -109,7 +109,11 @@ class EmaCrossover(Strategy):
     def __post_init__(self):
         suffix = f"_t{self.trend_period}" if self.trend_period > 0 else ""
         atr_suffix = f"_atr{self.atr_period}x{self.atr_mult}" if self.atr_period > 0 else ""
-        self.name = f"ema_cross_{self.timeframe}{suffix}{atr_suffix}"
+        self.name = (
+            f"ema_cross_{self.timeframe}"
+            f"_{self.fast_period}_{self.slow_period}"
+            f"{suffix}{atr_suffix}"
+        )
         self._fast = IncrementalEMA(self.fast_period)
         self._slow = IncrementalEMA(self.slow_period)
         self._trend: IncrementalEMA | None = (

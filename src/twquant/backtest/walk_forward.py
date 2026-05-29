@@ -179,6 +179,7 @@ def run_walk_forward(
             combined_metrics=result.metrics,
         )
 
+    active_windows: list[WalkForwardWindow] = []
     per_window_metrics: list[PerformanceMetrics] = []
     eq_pieces: list[pd.DataFrame] = []
     trade_pieces: list[pd.DataFrame] = []
@@ -201,6 +202,7 @@ def run_walk_forward(
                            cost_model=cost_model,
                            risk_manager=rm)
 
+        active_windows.append(w)
         per_window_metrics.append(res.metrics)
         eq_pieces.append(res.equity_curve)
         if not res.trades.empty:
@@ -212,7 +214,7 @@ def run_walk_forward(
 
     return WalkForwardResult(
         strategy_name=name,
-        windows=windows,
+        windows=active_windows,
         per_window_metrics=per_window_metrics,
         combined_equity=combined_eq,
         combined_trades=combined_tr,
