@@ -85,6 +85,19 @@ STRATEGIES = {
         fast_period=20, slow_period=200, timeframe="1d"),
     "ema_cross_1d_20_120": lambda: EmaCrossover(
         fast_period=20, slow_period=120, timeframe="1d"),
+    # grid-search top 30m：EMA20 系列（Sharpe=1.3~1.8, MDD=-11~-28%）
+    # EMA20/120 + ATR — 低 MDD 首選
+    "ema_cross_30m_20_120_atr7_1p5": lambda: EmaCrossover(
+        fast_period=20, slow_period=120, timeframe="30m", atr_period=7, atr_mult=1.5),
+    "ema_cross_30m_20_120_atr7_2": lambda: EmaCrossover(
+        fast_period=20, slow_period=120, timeframe="30m", atr_period=7, atr_mult=2.0),
+    "ema_cross_30m_20_120_atr14_1p5": lambda: EmaCrossover(
+        fast_period=20, slow_period=120, timeframe="30m", atr_period=14, atr_mult=1.5),
+    # EMA20/60 + ATR — 高 Sharpe 候選
+    "ema_cross_30m_20_60_atr7_1p5": lambda: EmaCrossover(
+        fast_period=20, slow_period=60, timeframe="30m", atr_period=7, atr_mult=1.5),
+    "ema_cross_30m_20_60_atr14_3": lambda: EmaCrossover(
+        fast_period=20, slow_period=60, timeframe="30m", atr_period=14, atr_mult=3.0),
     # KD + EMA 組合（方式 1：EMA 定方向 + KD 低檔黃金交叉抓時機）
     "kd_ema_15m": lambda: KdEmaStrategy(timeframe="15m"),
     "kd_ema_30m": lambda: KdEmaStrategy(timeframe="30m"),
