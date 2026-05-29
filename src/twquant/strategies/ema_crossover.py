@@ -134,9 +134,14 @@ class EmaCrossover(Strategy):
 
         用途：walk-forward 在訓練期暖機完後，將策略「視為剛開始」
         的乾淨狀態進入測試期，避免訓練期的部位狀態洩漏到測試報酬。
+
+        注意：同時清除 _prev_fast / _prev_slow，避免訓練末尾的 EMA 相對位置
+        在測試期第一根 bar 觸發邊界假交叉（boundary false signal）。
         """
         self._target = Direction.FLAT
         self._peak_high = None
+        self._prev_fast = None  # 清除邊界假交叉風險
+        self._prev_slow = None
 
     # ──────────────────────────────────────────────────────────────────────
     def _update_atr(self, tr: float | None) -> None:

@@ -65,6 +65,16 @@ class TestWarmup:
         _warmup_strategy(strat, bars)
         assert strat.current_target == Direction.FLAT
 
+    def test_warmup_resets_prev_ema_to_avoid_boundary_crossover(self):
+        """修正回歸：reset_position 必須清除 _prev_fast/_prev_slow，
+        避免訓練末尾的 EMA 狀態在測試期第一根 bar 觸發假交叉。"""
+        strat = EmaCrossover(fast_period=2, slow_period=4, timeframe="1d")
+        prices = [100, 100, 100, 100, 200, 200, 200]
+        bars = _make_daily_bars(prices)
+        _warmup_strategy(strat, bars)
+        assert strat._prev_fast is None
+        assert strat._prev_slow is None
+
 
 class TestChainEquity:
     def test_chains_compound_capital(self):
