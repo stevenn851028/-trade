@@ -13,6 +13,14 @@
 
     # 比較兩個跑出來的結果
     python -m twquant.backtest.cli compare results/run_15m results/run_30m
+
+    # EMA + ATR 移動停利 grid search（15m，掃 atr_mult）
+    python -m twquant.backtest.cli grid-search \\
+        --timeframe 15m --db data/db/bars.sqlite \\
+        --start 2019-01-01 --end 2025-12-31 \\
+        --fast-periods 5,10,20 --slow-periods 30,60,120 \\
+        --atr-periods 0,14 --atr-mults 1.5,2.0,3.0 \\
+        --output results/grid_15m
 """
 
 from __future__ import annotations
@@ -27,6 +35,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from twquant.backtest.grid_search import results_to_df, run_grid_search, verdict
 from twquant.backtest.report import write_html_report
 from twquant.backtest.runner import run_backtest
 from twquant.backtest.walk_forward import run_walk_forward
@@ -48,6 +57,15 @@ STRATEGIES = {
         fast_period=10, slow_period=60, timeframe="1d", trend_period=200),
     "ema_cross_1d_t100": lambda: EmaCrossover(
         fast_period=10, slow_period=60, timeframe="1d", trend_period=100),
+    # ATR 移動停利（atr_period=14, atr_mult=2.0）
+    "ema_cross_15m_atr2": lambda: EmaCrossover(
+        fast_period=10, slow_period=60, timeframe="15m", atr_period=14, atr_mult=2.0),
+    "ema_cross_30m_atr2": lambda: EmaCrossover(
+        fast_period=10, slow_period=60, timeframe="30m", atr_period=14, atr_mult=2.0),
+    "ema_cross_15m_atr3": lambda: EmaCrossover(
+        fast_period=10, slow_period=60, timeframe="15m", atr_period=14, atr_mult=3.0),
+    "ema_cross_30m_atr3": lambda: EmaCrossover(
+        fast_period=10, slow_period=60, timeframe="30m", atr_period=14, atr_mult=3.0),
     # KD + EMA 組合（方式 1：EMA 定方向 + KD 低檔黃金交叉抓時機）
     "kd_ema_15m": lambda: KdEmaStrategy(timeframe="15m"),
     "kd_ema_30m": lambda: KdEmaStrategy(timeframe="30m"),
@@ -259,6 +277,75 @@ def cmd_compare(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_grid_search(args: argparse.Namespace) -> int:
+    """掃 (fast, slow, trend, atr_period, atr_mult) 笛卡兒積，每組跑 walk-forward。"""
+
+    def _parse_int_list(s: str) -> list[int]:
+        return [int(x.strip()) for x in s.split(",") if x.strip()]
+
+    def _parse_float_list(s: str) -> list[float]:
+        return [float(x.strip()) for x in s.split(",") if x.strip()]
+
+    fast_periods = _parse_int_list(args.fast_periods)
+    slow_periods = _parse_int_list(args.slow_periods)
+    trend_periods = _parse_int_list(args.trend_periods) if args.trend_periods else [0]
+    atr_periods = _parse_int_list(args.atr_periods) if args.atr_periods else [0]
+    atr_mults = _parse_float_list(args.atr_mults) if args.atr_mults else [2.0]
+
+    start = _date_to_taipei_dt(args.start)
+    end = _date_to_taipei_dt(args.end, end_of_day=True)
+    cost_model = COST_MODELS[args.symbol]()
+
+    with BarStore(args.db) as store:
+        bars = store.query_bars(
+            symbol=args.symbol,
+            timeframe=args.timeframe,
+            start=start,
+            end=end,
+            month_code="CONT",
+        )
+    if bars.empty:
+        print("No CONT bars found; have you run `data.cli build-continuous`?",
+              file=sys.stderr)
+        return 1
+
+    n_combos = (
+        sum(1 for f in fast_periods for s in slow_periods if f < s)
+        * len(trend_periods)
+        * sum(len(atr_mults) if ap > 0 else 1 for ap in atr_periods)
+    )
+    print(f"Loaded {len(bars):,} bars  |  {n_combos} 組參數組合  |  "
+          f"train={args.train_months}m / test={args.test_months}m")
+
+    results = run_grid_search(
+        bars,
+        timeframe=args.timeframe,
+        fast_periods=fast_periods,
+        slow_periods=slow_periods,
+        trend_periods=trend_periods,
+        atr_periods=atr_periods,
+        atr_mults=atr_mults,
+        train_months=args.train_months,
+        test_months=args.test_months,
+        initial_cash=args.capital,
+        cost_model=cost_model,
+    )
+
+    df = results_to_df(results)
+    with pd.option_context("display.max_columns", None, "display.width", 200,
+                           "display.float_format", "{:.2f}".format):
+        print(df.to_string(index=False))
+    print()
+    print(verdict(results))
+
+    if args.output:
+        out = Path(args.output)
+        out.mkdir(parents=True, exist_ok=True)
+        df.to_csv(out / "grid_results.csv", index=False)
+        print(f"\nWrote {out}/grid_results.csv")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="twquant.backtest.cli",
                                 description="Backtest runner CLI")
@@ -292,6 +379,30 @@ def build_parser() -> argparse.ArgumentParser:
     pc = sub.add_parser("compare", help="並列比較多次回測的結果")
     pc.add_argument("runs", nargs="+", help="results/run_* 目錄")
     pc.set_defaults(func=cmd_compare)
+
+    pg = sub.add_parser("grid-search", help="參數普查：EMA ± ATR 移動停利")
+    pg.add_argument("--timeframe", required=True,
+                    help="K 棒週期，例如 15m / 30m / 1d")
+    pg.add_argument("--db", default="data/db/bars.sqlite")
+    pg.add_argument("--symbol", default="TX", choices=list(COST_MODELS.keys()))
+    pg.add_argument("--start", type=_parse_date, required=True)
+    pg.add_argument("--end", type=_parse_date, required=True)
+    pg.add_argument("--fast-periods", required=True,
+                    help="逗號分隔，例如 5,10,20")
+    pg.add_argument("--slow-periods", required=True,
+                    help="逗號分隔，例如 30,60,120")
+    pg.add_argument("--trend-periods", default=None,
+                    help="逗號分隔，0=無濾網，例如 0,100,200")
+    pg.add_argument("--atr-periods", default=None,
+                    help="逗號分隔，0=停用，例如 0,14")
+    pg.add_argument("--atr-mults", default=None,
+                    help="逗號分隔，例如 1.5,2.0,3.0（atr_period=0 的組合自動忽略此值）")
+    pg.add_argument("--train-months", type=int, default=12)
+    pg.add_argument("--test-months", type=int, default=3)
+    pg.add_argument("--capital", type=float, default=1_000_000)
+    pg.add_argument("--output", default=None,
+                    help="若指定則將結果寫成 grid_results.csv")
+    pg.set_defaults(func=cmd_grid_search)
 
     return p
 
