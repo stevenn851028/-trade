@@ -13,10 +13,13 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
 import pandas as pd
+
+log = logging.getLogger(__name__)
 
 from twquant.backtest.metrics import PerformanceMetrics, compute_metrics
 from twquant.backtest.runner import BacktestResult, run_backtest
@@ -154,7 +157,14 @@ def run_walk_forward(
     windows = make_windows(start_d, end_d, train_months, test_months)
 
     if not windows:
-        # 不夠資料：退化為單窗
+        # 資料不足：訓練期長度已超過可用資料，無法切出任何測試窗口
+        data_months = round((end_d - start_d).days / 30.44)
+        log.warning(
+            "walk-forward: 資料僅約 %d 個月，但 train=%d + test=%d = %d 個月，"
+            "無法建立任何測試窗口。請減少 --train-months / --test-months，"
+            "或補充更長的歷史資料。退化為全段單次回測（無 OOS 意義）。",
+            data_months, train_months, test_months, train_months + test_months,
+        )
         rm = risk_factory() if risk_factory else None
         result = run_backtest(bars, strategy_factory(),
                               initial_cash=initial_cash,

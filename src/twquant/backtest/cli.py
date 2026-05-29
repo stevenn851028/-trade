@@ -214,6 +214,10 @@ def cmd_walk_forward(args: argparse.Namespace) -> int:
     print("=" * 60)
     print(f"Walk-forward: {result.strategy_name}")
     print(f"  windows: {len(result.windows)}")
+    if not result.windows:
+        print("  ⚠ 資料不足以建立任何 OOS 測試窗口。")
+        print("    → 請減少 --train-months / --test-months，或補充更多歷史資料。")
+        print("    → 以下為「全段單次回測」結果，不具 OOS 意義，僅供參考。")
     for w, m in zip(result.windows, result.per_window_metrics):
         print(f"   [{w.test_start} → {w.test_end}]  "
               f"return={m.total_return_pct:+.2f}%  Sharpe={m.sharpe:+.2f}  "
