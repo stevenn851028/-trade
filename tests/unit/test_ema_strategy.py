@@ -4,8 +4,8 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from twquant.events import BarEvent, Direction
-from twquant.strategies.ema_crossover import EmaCrossover, IncrementalEMA
+from twquant.events import BarEvent, Direction, SignalEvent
+from twquant.strategies.ema_crossover import EmaCrossover, IncrementalATR, IncrementalEMA
 from twquant.data.session import TAIPEI
 
 
@@ -168,3 +168,117 @@ class TestTrendFilter:
         assert sig is not None
         assert sig.target == Direction.FLAT
         assert sig.reason == "death_cross"
+
+
+class TestIncrementalATR:
+    def test_seeded_with_sma(self):
+        atr = IncrementalATR(period=3)
+        assert not atr.ready
+        atr.update(10)
+        atr.update(20)
+        assert not atr.ready
+        v = atr.update(30)
+        assert atr.ready
+        assert v == pytest.approx(20.0)
+
+    def test_post_seed_uses_alpha(self):
+        atr = IncrementalATR(period=2)   # alpha = 2/(2+1) = 2/3
+        atr.update(10)
+        atr.update(20)
+        assert atr.ready
+        seed = atr.value  # 15
+        v = atr.update(30)
+        assert v == pytest.approx((2 / 3) * 30 + (1 / 3) * seed)
+
+    def test_invalid_period_raises(self):
+        with pytest.raises(ValueError):
+            IncrementalATR(0)
+
+
+class TestAtrTrailingStop:
+    """ATR 移動停利：使用前一根 ATR 值計算停利水準。
+
+    數值設計（fast=2, slow=4, atr_period=3, atr_mult=2.0）：
+
+    bars 0-3 @ 100 → EMA 暖機（fast & slow 均 ready 後皆等於 100）
+    bar 4 @ 200    → 黃金交叉，進場；TR = |200-100| = 100
+                     ATR seed 來自 bars 1-3（TR=0,0,0）→ ATR_seeded=0
+                     bar 4 ATR = 0.5×100 + 0.5×0 = 50；atr_prev_after=50
+    bars 5-9 @ 200 → TR=0，ATR 每根減半：25→12.5→6.25→3.125→1.5625
+                     atr_prev 在 bar 9 結束後 = 1.5625
+    bar 10 @ 193   → peak_high=200，trail_stop = 200 − 2×1.5625 = 196.875
+                     close=193 < 196.875 → ATR 移動停利觸發 ✓
+                     EMA：fast=2/3×193+1/3×199.73≈195.25 > slow≈194.40
+                     → 死亡交叉條件不成立 ✓（確認兩者不在同一根衝突）
+    """
+
+    def _build_strategy(self) -> EmaCrossover:
+        return EmaCrossover(
+            fast_period=2, slow_period=4, timeframe="15m",
+            atr_period=3, atr_mult=2.0,
+        )
+
+    def _run_prices(self, s: EmaCrossover, prices: list[float]) -> SignalEvent | None:
+        t0 = datetime(2026, 4, 15, 9, 0, tzinfo=TAIPEI)
+        sig = None
+        for i, p in enumerate(prices):
+            sig = s.on_bar(make_bar(t0 + timedelta(minutes=15 * i), p))
+        return sig
+
+    def test_trail_stop_fires_before_death_cross(self):
+        """close=193 只觸發移動停利，fast(195.25) > slow(194.40) 故死亡交叉不成立。"""
+        s = self._build_strategy()
+        prices = [100.0] * 4 + [200.0] + [200.0] * 5 + [193.0]
+        sig = self._run_prices(s, prices)
+
+        assert sig is not None
+        assert sig.target == Direction.FLAT
+        assert sig.reason == "atr_trail_stop"
+        assert s.current_target == Direction.FLAT
+
+    def test_no_trail_stop_above_level(self):
+        """close=198（高於 trail_stop=196.875）不應觸發停利。"""
+        s = self._build_strategy()
+        prices = [100.0] * 4 + [200.0] + [200.0] * 5 + [198.0]
+        sig = self._run_prices(s, prices)
+
+        # 198 > 196.875 → 沒有停利；EMA 交叉條件也未成立（fast≈199.8 > slow≈197.9）
+        assert sig is None
+        assert s.current_target == Direction.LONG
+
+    def test_no_trail_stop_when_atr_disabled(self):
+        """atr_period=0 時不啟用移動停利，行為與原策略相同。"""
+        s = EmaCrossover(fast_period=2, slow_period=4, timeframe="15m", atr_period=0)
+        prices = [100.0] * 4 + [200.0] + [200.0] * 5 + [193.0]
+        sig = self._run_prices(s, prices)
+
+        # 193 不觸發死亡交叉（fast > slow），又無 ATR 停利 → 應無訊號
+        assert sig is None
+        assert s.current_target == Direction.LONG
+
+    def test_peak_high_updates_correctly(self):
+        """持倉期間 peak_high 應追蹤每根 high；回落後停利水準應基於歷史最高。"""
+        s = self._build_strategy()
+        t0 = datetime(2026, 4, 15, 9, 0, tzinfo=TAIPEI)
+
+        # 暖機 + 黃金交叉
+        for i, p in enumerate([100.0] * 4 + [200.0]):
+            s.on_bar(make_bar(t0 + timedelta(minutes=15 * i), p))
+        assert s._peak_high == pytest.approx(200.0)
+
+        # 漲到 300 → peak_high 應更新
+        s.on_bar(make_bar(t0 + timedelta(minutes=15 * 5), 300.0))
+        assert s._peak_high == pytest.approx(300.0)
+
+        # 回到 280 → peak_high 不應下修
+        s.on_bar(make_bar(t0 + timedelta(minutes=15 * 6), 280.0))
+        assert s._peak_high == pytest.approx(300.0)
+
+    def test_peak_high_resets_after_trail_stop(self):
+        """ATR 停利出場後，peak_high 應清空，重新進場時重新計算。"""
+        s = self._build_strategy()
+        prices = [100.0] * 4 + [200.0] + [200.0] * 5 + [193.0]
+        self._run_prices(s, prices)
+
+        assert s._peak_high is None
+        assert s.current_target == Direction.FLAT
