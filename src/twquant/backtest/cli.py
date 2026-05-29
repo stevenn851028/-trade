@@ -66,6 +66,16 @@ STRATEGIES = {
         fast_period=10, slow_period=60, timeframe="15m", atr_period=14, atr_mult=3.0),
     "ema_cross_30m_atr3": lambda: EmaCrossover(
         fast_period=10, slow_period=60, timeframe="30m", atr_period=14, atr_mult=3.0),
+    # 1d + ATR 移動停利（配合 10 年日線資料驗證）
+    "ema_cross_1d_atr2": lambda: EmaCrossover(
+        fast_period=10, slow_period=60, timeframe="1d", atr_period=14, atr_mult=2.0),
+    "ema_cross_1d_atr3": lambda: EmaCrossover(
+        fast_period=10, slow_period=60, timeframe="1d", atr_period=14, atr_mult=3.0),
+    # grid-search 最佳 1d 候選（待驗證後更新）
+    "ema_cross_1d_5_60_atr2": lambda: EmaCrossover(
+        fast_period=5, slow_period=60, timeframe="1d", atr_period=14, atr_mult=2.0),
+    "ema_cross_1d_5_60_atr3": lambda: EmaCrossover(
+        fast_period=5, slow_period=60, timeframe="1d", atr_period=14, atr_mult=3.0),
     # KD + EMA 組合（方式 1：EMA 定方向 + KD 低檔黃金交叉抓時機）
     "kd_ema_15m": lambda: KdEmaStrategy(timeframe="15m"),
     "kd_ema_30m": lambda: KdEmaStrategy(timeframe="30m"),
