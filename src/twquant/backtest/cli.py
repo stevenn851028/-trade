@@ -98,6 +98,13 @@ STRATEGIES = {
         fast_period=20, slow_period=60, timeframe="30m", atr_period=7, atr_mult=1.5),
     "ema_cross_30m_20_60_atr14_3": lambda: EmaCrossover(
         fast_period=20, slow_period=60, timeframe="30m", atr_period=14, atr_mult=3.0),
+    # entry_limit_pts=50：黃金交叉時收盤 ≤ slow_ema + 50 才進場（拉回進場過濾）
+    "ema_cross_30m_20_120_atr7_1p5_el50": lambda: EmaCrossover(
+        fast_period=20, slow_period=120, timeframe="30m",
+        atr_period=7, atr_mult=1.5, entry_limit_pts=50),
+    "ema_cross_30m_20_60_atr14_3_el50": lambda: EmaCrossover(
+        fast_period=20, slow_period=60, timeframe="30m",
+        atr_period=14, atr_mult=3.0, entry_limit_pts=50),
     # KD + EMA 組合（方式 1：EMA 定方向 + KD 低檔黃金交叉抓時機）
     "kd_ema_15m": lambda: KdEmaStrategy(timeframe="15m"),
     "kd_ema_30m": lambda: KdEmaStrategy(timeframe="30m"),

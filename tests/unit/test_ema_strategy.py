@@ -170,6 +170,62 @@ class TestTrendFilter:
         assert sig.reason == "death_cross"
 
 
+class TestEntryLimitPts:
+    """entry_limit_pts 進場限價過濾器測試。"""
+
+    def test_name_includes_el_suffix(self):
+        s = EmaCrossover(fast_period=2, slow_period=4, timeframe="30m", entry_limit_pts=50)
+        assert "_el50" in s.name
+
+    def test_blocks_entry_when_close_too_far_above_slow(self):
+        """交叉時 close 遠超 slow_ema + limit → 不進場。"""
+        # fast=2, slow=4, entry_limit_pts=10（故意設很小）
+        s = EmaCrossover(fast_period=2, slow_period=4, timeframe="15m", entry_limit_pts=10)
+        t0 = datetime(2026, 4, 15, 9, 0, tzinfo=TAIPEI)
+        # 先跑 4 根平盤讓 EMA 就緒，再一根大漲製造交叉
+        # 大漲時 close 遠超 slow_ema → 應被過濾
+        for i, p in enumerate([100.0] * 4):
+            s.on_bar(make_bar(t0 + timedelta(minutes=15 * i), p))
+        # close=200 >> slow_ema ≈ 100，遠超 limit=10
+        sig = s.on_bar(make_bar(t0 + timedelta(minutes=60), 200.0))
+        assert sig is None
+        assert s.current_target == Direction.FLAT
+
+    def test_allows_entry_when_close_within_limit(self):
+        """交叉時 close 在 slow_ema + limit 範圍內 → 正常進場。"""
+        s = EmaCrossover(fast_period=2, slow_period=4, timeframe="15m", entry_limit_pts=200)
+        t0 = datetime(2026, 4, 15, 9, 0, tzinfo=TAIPEI)
+        for i, p in enumerate([100.0] * 4):
+            s.on_bar(make_bar(t0 + timedelta(minutes=15 * i), p))
+        sig = s.on_bar(make_bar(t0 + timedelta(minutes=60), 200.0))
+        # slow_ema ≈ 100, close=200, limit=200 → 200 <= 100+200=300 → 通過
+        assert sig is not None
+        assert sig.target == Direction.LONG
+
+    def test_no_limit_when_entry_limit_pts_zero(self):
+        """entry_limit_pts=0 代表不限制，行為與原版相同。"""
+        s = EmaCrossover(fast_period=2, slow_period=4, timeframe="15m", entry_limit_pts=0)
+        t0 = datetime(2026, 4, 15, 9, 0, tzinfo=TAIPEI)
+        for i, p in enumerate([100.0] * 4):
+            s.on_bar(make_bar(t0 + timedelta(minutes=15 * i), p))
+        sig = s.on_bar(make_bar(t0 + timedelta(minutes=60), 200.0))
+        assert sig is not None
+        assert sig.target == Direction.LONG
+
+    def test_exit_unaffected_by_entry_limit(self):
+        """entry_limit_pts 只影響進場；出場（死亡交叉）不受影響。"""
+        s = EmaCrossover(fast_period=2, slow_period=4, timeframe="15m", entry_limit_pts=200)
+        t0 = datetime(2026, 4, 15, 9, 0, tzinfo=TAIPEI)
+        # 進場
+        for i, p in enumerate([100.0] * 4 + [150.0]):
+            s.on_bar(make_bar(t0 + timedelta(minutes=15 * i), p))
+        assert s.current_target == Direction.LONG
+        # 死亡交叉出場
+        sig = s.on_bar(make_bar(t0 + timedelta(minutes=75), 80.0))
+        assert sig is not None
+        assert sig.target == Direction.FLAT
+
+
 class TestIncrementalATR:
     def test_seeded_with_sma(self):
         atr = IncrementalATR(period=3)

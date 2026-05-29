@@ -105,14 +105,16 @@ class EmaCrossover(Strategy):
     trend_period: int = 0     # 0 = 無濾網；> 0 則啟用 close > EMA(trend) 作為進場條件
     atr_period: int = 0       # 0 = 無移動停利；> 0 啟用 ATR 移動停利
     atr_mult: float = 2.0     # 移動停利水準 = peak_high − atr_mult × ATR
+    entry_limit_pts: int = 0  # 0 = 無限制；> 0 = 僅在 close ≤ slow_ema + N 點時進場
 
     def __post_init__(self):
         suffix = f"_t{self.trend_period}" if self.trend_period > 0 else ""
         atr_suffix = f"_atr{self.atr_period}x{self.atr_mult}" if self.atr_period > 0 else ""
+        el_suffix = f"_el{self.entry_limit_pts}" if self.entry_limit_pts > 0 else ""
         self.name = (
             f"ema_cross_{self.timeframe}"
             f"_{self.fast_period}_{self.slow_period}"
-            f"{suffix}{atr_suffix}"
+            f"{suffix}{atr_suffix}{el_suffix}"
         )
         self._fast = IncrementalEMA(self.fast_period)
         self._slow = IncrementalEMA(self.slow_period)
@@ -212,10 +214,16 @@ class EmaCrossover(Strategy):
             crossed_up = self._prev_fast <= self._prev_slow and f > s
             crossed_down = self._prev_fast >= self._prev_slow and f < s
 
-            # 進場：黃金交叉 + 趨勢濾網（若啟用）
+            # 進場：黃金交叉 + 趨勢濾網 + 進場限價（若啟用）
             if crossed_up and self._target == Direction.FLAT:
                 trend_ok = (self._trend is None) or (bar.close > self._trend.value)
-                if trend_ok:
+                # entry_limit_pts > 0：僅在交叉那根收盤價 ≤ slow_ema + N 點時才進場，
+                # 避免追高（交叉時價格已遠超 EMA 支撐）
+                entry_ok = (
+                    self.entry_limit_pts == 0
+                    or bar.close <= s + self.entry_limit_pts
+                )
+                if trend_ok and entry_ok:
                     self._target = Direction.LONG
                     self._peak_high = bar.high  # 進場時初始化高水位
                     signal = SignalEvent(bar.ts, Direction.LONG, "golden_cross")
