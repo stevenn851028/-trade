@@ -1,0 +1,63 @@
+name: Signal Monitor
+
+# 每半小時後第 17 分鐘觸發（bar 收盤 17 分鐘後，資料同步緩衝）
+# 台指期 30m bar 收盤時刻（TST）→ 本 cron 對應觸發（UTC）：
+#   日盤  09:15, 09:45, ..., 13:45 TST  → 01:17, 01:47, ..., 05:47 UTC
+#   夜盤  15:30, 16:00, ..., 05:00 TST  → 07:17, 07:47, ..., 20:47 UTC
+# 加上手動觸發供測試用。
+on:
+  schedule:
+    - cron: '17,47 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (不送 Telegram，只印訊號)'
+        required: false
+        default: 'false'
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # 還原上次執行的狀態（去重用）
+      - name: Restore signal state
+        uses: actions/cache/restore@v4
+        with:
+          path: signal_state.json
+          key: signal-state-${{ github.run_id }}
+          restore-keys: |
+            signal-state-
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -e .
+          pip install shioaji requests
+
+      - name: Run signal monitor
+        env:
+          SHIOAJI_API_KEY:     ${{ secrets.SHIOAJI_API_KEY }}
+          SHIOAJI_SECRET_KEY:  ${{ secrets.SHIOAJI_SECRET_KEY }}
+          TELEGRAM_BOT_TOKEN:  ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:    ${{ secrets.TELEGRAM_CHAT_ID }}
+          # 可在 workflow_dispatch 設 dry_run=true 時改寫 token 為空字串以防誤送
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+        run: python scripts/signal_monitor.py
+
+      # 永遠儲存狀態，即使 monitor 失敗也不影響去重記憶
+      - name: Save signal state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: signal_state.json
+          key: signal-state-${{ github.run_id }}
