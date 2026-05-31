@@ -35,7 +35,13 @@ from pathlib import Path
 
 import pandas as pd
 
-from twquant.backtest.grid_search import results_to_df, run_grid_search, verdict
+from twquant.backtest.grid_search import (
+    kd_results_to_df,
+    results_to_df,
+    run_grid_search,
+    run_kd_grid_search,
+    verdict,
+)
 from twquant.backtest.report import write_html_report
 from twquant.backtest.runner import run_backtest
 from twquant.backtest.walk_forward import run_walk_forward
@@ -406,6 +412,73 @@ def cmd_grid_search(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_kd_grid_search(args: argparse.Namespace) -> int:
+    """掃 (fast, slow, rsv_period, atr_period, atr_mult) 笛卡兒積，每組跑 KdEmaCrossover walk-forward。"""
+
+    def _parse_int_list(s: str) -> list[int]:
+        return [int(x.strip()) for x in s.split(",") if x.strip()]
+
+    def _parse_float_list(s: str) -> list[float]:
+        return [float(x.strip()) for x in s.split(",") if x.strip()]
+
+    fast_periods = _parse_int_list(args.fast_periods)
+    slow_periods = _parse_int_list(args.slow_periods)
+    rsv_periods  = _parse_int_list(args.rsv_periods) if args.rsv_periods else [9]
+    atr_periods  = _parse_int_list(args.atr_periods) if args.atr_periods else [0]
+    atr_mults    = _parse_float_list(args.atr_mults) if args.atr_mults else [2.0]
+
+    start = _date_to_taipei_dt(args.start)
+    end   = _date_to_taipei_dt(args.end, end_of_day=True)
+    cost_model = COST_MODELS[args.symbol]()
+
+    with BarStore(args.db) as store:
+        bars = store.query_bars(
+            symbol=args.symbol,
+            timeframe=args.timeframe,
+            start=start, end=end,
+            month_code="CONT",
+        )
+    if bars.empty:
+        print("No CONT bars found; have you built 5m continuous bars?", file=sys.stderr)
+        return 1
+
+    n_combos = (
+        sum(1 for f in fast_periods for s in slow_periods if f < s)
+        * len(rsv_periods)
+        * sum(len(atr_mults) if ap > 0 else 1 for ap in atr_periods)
+    )
+    print(f"Loaded {len(bars):,} bars  |  {n_combos} 組參數組合  |  "
+          f"train={args.train_months}m / test={args.test_months}m")
+
+    results = run_kd_grid_search(
+        bars,
+        timeframe=args.timeframe,
+        fast_periods=fast_periods,
+        slow_periods=slow_periods,
+        rsv_periods=rsv_periods,
+        atr_periods=atr_periods,
+        atr_mults=atr_mults,
+        train_months=args.train_months,
+        test_months=args.test_months,
+        initial_cash=args.capital,
+        cost_model=cost_model,
+    )
+
+    df = kd_results_to_df(results)
+    with pd.option_context("display.max_columns", None, "display.width", 200,
+                           "display.float_format", "{:.2f}".format):
+        print(df.to_string(index=False))
+    print()
+    print(verdict(results, label="KD+EMA 交叉"))
+
+    if args.output:
+        out = Path(args.output)
+        out.mkdir(parents=True, exist_ok=True)
+        df.to_csv(out / "kd_grid_results.csv", index=False)
+        print(f"\nWrote {out}/kd_grid_results.csv")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="twquant.backtest.cli",
                                 description="Backtest runner CLI")
@@ -463,6 +536,31 @@ def build_parser() -> argparse.ArgumentParser:
     pg.add_argument("--output", default=None,
                     help="若指定則將結果寫成 grid_results.csv")
     pg.set_defaults(func=cmd_grid_search)
+
+    pk = sub.add_parser("kd-grid-search",
+                        help="KD+EMA 同步交叉策略參數普查")
+    pk.add_argument("--timeframe", required=True,
+                    help="K 棒週期，例如 5m / 15m / 30m")
+    pk.add_argument("--db", default="data/db/bars.sqlite")
+    pk.add_argument("--symbol", default="TX", choices=list(COST_MODELS.keys()))
+    pk.add_argument("--start", type=_parse_date, required=True)
+    pk.add_argument("--end",   type=_parse_date, required=True)
+    pk.add_argument("--fast-periods", required=True,
+                    help="EMA 快線週期，逗號分隔，例如 5,10,20")
+    pk.add_argument("--slow-periods", required=True,
+                    help="EMA 慢線週期，逗號分隔，例如 30,60,120")
+    pk.add_argument("--rsv-periods", default="9",
+                    help="KD RSV 週期，逗號分隔，預設 9，例如 5,9,14")
+    pk.add_argument("--atr-periods", default=None,
+                    help="ATR 週期，逗號分隔，0=停用，例如 0,7,14")
+    pk.add_argument("--atr-mults", default=None,
+                    help="ATR 乘數，逗號分隔，例如 1.5,2.0,3.0")
+    pk.add_argument("--train-months", type=int, default=12)
+    pk.add_argument("--test-months",  type=int, default=3)
+    pk.add_argument("--capital", type=float, default=1_000_000)
+    pk.add_argument("--output", default=None,
+                    help="若指定則將結果寫成 kd_grid_results.csv")
+    pk.set_defaults(func=cmd_kd_grid_search)
 
     return p
 
