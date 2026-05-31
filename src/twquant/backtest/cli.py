@@ -43,7 +43,7 @@ from twquant.data.session import TAIPEI
 from twquant.data.sqlite_store import BarStore
 from twquant.execution import CostModel
 from twquant.strategies.ema_crossover import EmaCrossover
-from twquant.strategies.kd_ema import KdEmaStrategy
+from twquant.strategies.kd_ema import KdEmaCrossover, KdEmaStrategy
 
 log = logging.getLogger(__name__)
 
@@ -109,6 +109,23 @@ STRATEGIES = {
     "kd_ema_15m": lambda: KdEmaStrategy(timeframe="15m"),
     "kd_ema_30m": lambda: KdEmaStrategy(timeframe="30m"),
     "kd_ema_1d": lambda: KdEmaStrategy(timeframe="1d"),
+    # KD + EMA 組合（方式 2：EMA fast/slow 黃金交叉 + KD 黃金交叉同步進場）
+    # 主力候選：5m EMA10/60 + KD(9,3,3) + ATR 移動停利
+    "kd_cross_5m_10_60_kd9_atr7_2":  lambda: KdEmaCrossover(
+        timeframe="5m", fast_period=10, slow_period=60,
+        rsv_period=9, atr_period=7, atr_mult=2.0),
+    "kd_cross_5m_10_60_kd9_atr14_2": lambda: KdEmaCrossover(
+        timeframe="5m", fast_period=10, slow_period=60,
+        rsv_period=9, atr_period=14, atr_mult=2.0),
+    "kd_cross_5m_10_60_kd9_atr7_1p5": lambda: KdEmaCrossover(
+        timeframe="5m", fast_period=10, slow_period=60,
+        rsv_period=9, atr_period=7, atr_mult=1.5),
+    "kd_cross_5m_10_60_kd9": lambda: KdEmaCrossover(
+        timeframe="5m", fast_period=10, slow_period=60, rsv_period=9),
+    # 較寬鬆的慢線（EMA120）— 趨勢過濾更強
+    "kd_cross_5m_10_120_kd9_atr7_2": lambda: KdEmaCrossover(
+        timeframe="5m", fast_period=10, slow_period=120,
+        rsv_period=9, atr_period=7, atr_mult=2.0),
 }
 
 COST_MODELS = {
